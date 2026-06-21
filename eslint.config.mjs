@@ -17,6 +17,9 @@ export default defineConfig([
         ...globals.browser,
         ...globals.node
       }
+    },
+    rules: {
+      'react-hooks/immutability': 'off'
     }
   }
 ]);
