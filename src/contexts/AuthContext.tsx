@@ -24,7 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const refreshToken = await SecureStore.getItemAsync(TOKEN_KEYS.refresh);
       if (refreshToken) {
-        apiLogout(refreshToken);
+        apiLogout(refreshToken).catch(() => {});
       }
     } catch {
       // fire-and-forget; ignore logout API errors

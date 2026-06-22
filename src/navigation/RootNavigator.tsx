@@ -1,4 +1,5 @@
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { useAuth } from '../hooks/useAuth';
 import { AuthNavigator } from './AuthNavigator';
 import { AppNavigator } from './AppNavigator';
@@ -15,7 +16,15 @@ export function RootNavigator() {
     );
   }
 
-  return isAuthenticated ? <AppNavigator /> : <AuthNavigator />;
+  return isAuthenticated ? (
+    <Animated.View entering={FadeIn.duration(400)} style={styles.fill}>
+      <AppNavigator />
+    </Animated.View>
+  ) : (
+    <Animated.View entering={FadeIn.duration(400)} style={styles.fill}>
+      <AuthNavigator />
+    </Animated.View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -24,5 +33,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.background
-  }
+  },
+  fill: { flex: 1 }
 });

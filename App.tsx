@@ -10,6 +10,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { NavigationContainer } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './src/contexts/AuthContext';
+import { ToastProvider } from './src/contexts/ToastContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { colors } from './src/theme/colors';
 
@@ -36,16 +37,18 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <BottomSheetModalProvider>
-        <QueryClientProvider client={queryClient}>
-          <AuthProvider>
-            <NavigationContainer>
-              <RootNavigator />
-            </NavigationContainer>
-          </AuthProvider>
-        </QueryClientProvider>
-      </BottomSheetModalProvider>
-      <StatusBar style="dark" />
+      <ToastProvider>
+        <BottomSheetModalProvider>
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <NavigationContainer>
+                <RootNavigator />
+              </NavigationContainer>
+            </AuthProvider>
+          </QueryClientProvider>
+        </BottomSheetModalProvider>
+        <StatusBar style="dark" />
+      </ToastProvider>
     </GestureHandlerRootView>
   );
 }
