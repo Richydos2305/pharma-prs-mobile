@@ -6,3 +6,4 @@ export { Avatar } from './Avatar';
 export { BottomSheetWrapper } from './BottomSheetWrapper';
 export { AnimatedPressable } from './AnimatedPressable';
 export { SuccessCheck } from './SuccessCheck';
+export { SpotlightButton } from './SpotlightButton';

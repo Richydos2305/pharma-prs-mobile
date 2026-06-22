@@ -1,5 +1,4 @@
 import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import { useStaggerFadeIn } from '../../hooks/useStaggerFadeIn';
@@ -13,6 +12,7 @@ import { queryKeys } from '../../api/queryKeys';
 import { Avatar, AnimatedPressable } from '../../components/ui';
 import { ScreenWrapper } from '../../components/layout';
 import { useAuth } from '../../hooks/useAuth';
+import { useToast } from '../../contexts/ToastContext';
 import { usePressSpring } from '../../hooks/usePressSpring';
 import { colors } from '../../theme/colors';
 import { fonts } from '../../theme/typography';
@@ -27,6 +27,13 @@ type ProfileNavProp = CompositeNavigationProp<
 export function ProfileScreen() {
   const navigation = useNavigation<ProfileNavProp>();
   const { logout } = useAuth();
+  const { showToast } = useToast();
+
+  async function handleSignOut() {
+    await logout();
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+    showToast('Signed out successfully', 'success');
+  }
   const [s0, s1, s2, s3, s4] = useStaggerFadeIn(5);
 
   const { animatedStyle: formBtnStyle, onPressIn: formPressIn, onPressOut: formPressOut } = usePressSpring();
@@ -133,12 +140,16 @@ export function ProfileScreen() {
           {/* Session */}
           <Animated.View style={[styles.sessionSection, s4]}>
             <Text style={styles.sessionLabel}>Actions</Text>
-            <AnimatedPressable onPress={logout} onPressIn={signOutPressIn} onPressOut={signOutPressOut} style={[styles.signOutBtn, signOutStyle]}>
+            <AnimatedPressable
+              onPress={handleSignOut}
+              onPressIn={signOutPressIn}
+              onPressOut={signOutPressOut}
+              style={[styles.signOutBtn, signOutStyle]}
+            >
               <Text style={styles.signOutText}>Sign Out</Text>
             </AnimatedPressable>
           </Animated.View>
         </ScrollView>
-        <LinearGradient colors={['rgba(245,242,233,0)', '#F5F2E9']} style={styles.scrollFade} pointerEvents="none" />
       </View>
     </ScreenWrapper>
   );
@@ -224,6 +235,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E6C8BF'
   },
-  signOutText: { fontFamily: fonts.bodySemiBold, fontSize: 14, color: '#B4553D' },
-  scrollFade: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 80 }
+  signOutText: { fontFamily: fonts.bodySemiBold, fontSize: 14, color: '#B4553D' }
 });

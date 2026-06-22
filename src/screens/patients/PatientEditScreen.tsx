@@ -8,6 +8,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { CalendarDays, Check, ChevronDown, ChevronLeft, Lock, Upload, X } from 'lucide-react-native';
 import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { getPatient, updatePatient, uploadPatientDocument } from '../../api/patients';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { listPharmacists } from '../../api/pharmacists';
 import { getSettings } from '../../api/settings';
 import { queryKeys } from '../../api/queryKeys';
@@ -233,11 +234,17 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
 
   // ── File picker helpers ──────────────────────────────────────────────────────
 
+  const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
   async function handlePickFile(fieldId: string) {
     try {
       const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
+        if (asset.size && asset.size > MAX_FILE_BYTES) {
+          Alert.alert('File too large', `"${asset.name}" is ${(asset.size / (1024 * 1024)).toFixed(1)} MB. Files must be under 10 MB.`);
+          return;
+        }
         const pending: MobilePendingFile = { uri: asset.uri, mimeType: asset.mimeType ?? undefined, name: asset.name };
         setStandardFileState((prev) => ({
           ...prev,
@@ -254,6 +261,10 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
       const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
+        if (asset.size && asset.size > MAX_FILE_BYTES) {
+          Alert.alert('File too large', `"${asset.name}" is ${(asset.size / (1024 * 1024)).toFixed(1)} MB. Files must be under 10 MB.`);
+          return;
+        }
         const pending: MobilePendingFile = { uri: asset.uri, mimeType: asset.mimeType ?? undefined, name: asset.name };
         setRepeatableFileState((prev) => {
           const rows = [...(prev[sectionId] ?? [])];
@@ -367,9 +378,9 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
         phoneNumber: values['core-phone-number'],
         customFields: { sections }
       });
-    } catch {
-      shake();
+    } catch (err) {
       setSaving(false);
+      Alert.alert('Could not save patient', getApiErrorMessage(err));
     }
   }
 

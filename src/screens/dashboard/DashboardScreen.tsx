@@ -78,7 +78,14 @@ function RecentPatientCard({ patient, onPress }: { patient: IPatient; onPress: (
 
 export function DashboardScreen() {
   const navigation = useNavigation<DashboardNavigationProp>();
-  const [s0, s1, s2, s3, s4] = useStaggerFadeIn(5);
+
+  const { data: settings, isLoading: settingsLoading } = useQuery({ queryKey: queryKeys.settings, queryFn: getSettings });
+  const { data: patients, isLoading: patientsLoading } = useQuery({ queryKey: queryKeys.patients.all, queryFn: () => listPatients() });
+  const { data: user, isLoading: meLoading } = useQuery({ queryKey: queryKeys.me, queryFn: getMe });
+
+  const isLoading = settingsLoading || patientsLoading || meLoading;
+
+  const [s0, s1, s2, s3, s4] = useStaggerFadeIn(5, !isLoading);
 
   const shimmer = useMemo(() => new Animated.Value(0.3), []);
   const { animatedStyle: primaryBtnStyle, onPressIn: primaryPressIn, onPressOut: primaryPressOut } = usePressSpring();
@@ -94,12 +101,6 @@ export function DashboardScreen() {
     animation.start();
     return () => animation.stop();
   }, [shimmer]);
-
-  const { data: settings, isLoading: settingsLoading } = useQuery({ queryKey: queryKeys.settings, queryFn: getSettings });
-  const { data: patients, isLoading: patientsLoading } = useQuery({ queryKey: queryKeys.patients.all, queryFn: () => listPatients() });
-  const { data: user, isLoading: meLoading } = useQuery({ queryKey: queryKeys.me, queryFn: getMe });
-
-  const isLoading = settingsLoading || patientsLoading || meLoading;
 
   if (isLoading) {
     return (
