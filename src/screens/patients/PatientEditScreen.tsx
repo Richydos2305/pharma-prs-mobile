@@ -33,6 +33,7 @@ import {
   hydrateStandardSectionValues
 } from '../../utils/patientFormSerialization';
 import type { MobileFileFieldState, MobilePendingFile } from '../../utils/patientFormSerialization';
+import { formatDateForDisplay } from '../../utils/getLastAppointmentDate';
 
 type Props = NativeStackScreenProps<PatientsStackParamList, 'PatientEdit'>;
 
@@ -445,7 +446,9 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
                 {field.label}
                 {field.required ? ' *' : ''}
               </Text>
-              <Text style={[styles.fieldBoxInput, !selectedDate && styles.fieldBoxInputPlaceholder]}>{selectedDate || 'Select date...'}</Text>
+              <Text style={[styles.fieldBoxInput, !selectedDate && styles.fieldBoxInputPlaceholder]}>
+                {selectedDate ? formatDateForDisplay(selectedDate) : 'Select date...'}
+              </Text>
             </View>
             <CalendarDays size={16} color={colors.textMuted} />
           </Pressable>
@@ -574,7 +577,9 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
           >
             <View style={styles.fieldBoxSelectLeft}>
               <Text style={styles.fieldBoxLabel}>{field.label}</Text>
-              <Text style={[styles.fieldBoxInput, !selectedDate && styles.fieldBoxInputPlaceholder]}>{selectedDate || 'Select date...'}</Text>
+              <Text style={[styles.fieldBoxInput, !selectedDate && styles.fieldBoxInputPlaceholder]}>
+                {selectedDate ? formatDateForDisplay(selectedDate) : 'Select date...'}
+              </Text>
             </View>
             <CalendarDays size={16} color={colors.textMuted} />
           </Pressable>
@@ -720,7 +725,7 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
               return;
             }
             if (date) {
-              writeDateValue(date.toLocaleDateString('en-GB'));
+              writeDateValue(date.toISOString().split('T')[0]);
             }
             setDatePickerCtx(null);
           }}

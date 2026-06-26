@@ -20,6 +20,7 @@ import type { FieldSchema, FormSchema } from '../../types/formBuilder';
 import type { IPatient } from '../../types';
 import type { PatientsStackParamList } from '../../navigation/types';
 import { hydrateRepeatableSectionRows, hydrateStandardSectionValues } from '../../utils/patientFormSerialization';
+import { formatDateForDisplay } from '../../utils/getLastAppointmentDate';
 
 type Props = NativeStackScreenProps<PatientsStackParamList, 'PatientDetail'>;
 
@@ -129,7 +130,8 @@ export function PatientDetailScreen({ route, navigation }: Props) {
       const meta = getRawFileMetadata(patient!, sectionId, field.id, rowIndex ?? 0);
       return <FileFieldBox key={field.id} label={field.label} name={meta?.name ?? hydratedValue ?? null} url={meta?.url} />;
     }
-    return <FieldBox key={field.id} label={field.label} value={hydratedValue} multiline={field.type === 'textarea'} />;
+    const displayValue = field.type === 'date' ? formatDateForDisplay(hydratedValue) : hydratedValue;
+    return <FieldBox key={field.id} label={field.label} value={displayValue} multiline={field.type === 'textarea'} />;
   }
 
   return (

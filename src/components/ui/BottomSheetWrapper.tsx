@@ -1,30 +1,24 @@
 import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useMemo } from 'react';
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
+import { View } from 'react-native';
 import { colors } from '../../theme/colors';
 
 interface BottomSheetWrapperProps {
-  snapPoints: (string | number)[];
+  snapPoints?: (string | number)[];
+  enableDynamicSizing?: boolean;
+  bottomInset?: number;
   children: React.ReactNode;
   onClose?: () => void;
-  /** Pass false when the sheet contains its own gesture handlers (e.g. draggable lists)
-   *  so the sheet's pan handler doesn't compete with them. Defaults to true. */
   enableContentPanningGesture?: boolean;
 }
 
 export const BottomSheetWrapper = forwardRef<BottomSheetModal, BottomSheetWrapperProps>(
-  ({ snapPoints, children, enableContentPanningGesture = true }, ref) => {
+  ({ snapPoints, enableDynamicSizing = false, bottomInset, children, enableContentPanningGesture = true }, ref) => {
     const memoizedSnapPoints = useMemo(() => snapPoints, [snapPoints]);
 
     const renderBackdrop = useCallback(
-      (props: BottomSheetBackdropProps) => (
-        <BottomSheetBackdrop
-          {...props}
-          disappearsOnIndex={-1}
-          appearsOnIndex={0}
-          // No onPress — BottomSheetModal dismisses on backdrop tap natively
-        />
-      ),
+      (props: BottomSheetBackdropProps) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
       []
     );
 
@@ -32,15 +26,15 @@ export const BottomSheetWrapper = forwardRef<BottomSheetModal, BottomSheetWrappe
       <BottomSheetModal
         ref={ref}
         snapPoints={memoizedSnapPoints}
-        enableDynamicSizing={false}
+        enableDynamicSizing={enableDynamicSizing}
+        bottomInset={bottomInset}
         enablePanDownToClose
         enableContentPanningGesture={enableContentPanningGesture}
         backdropComponent={renderBackdrop}
         backgroundStyle={sheetStyles.background}
         handleIndicatorStyle={sheetStyles.handle}
-        // No onDismiss — avoids the re-entrant dismiss() loop that breaks re-opening
       >
-        <BottomSheetView style={sheetStyles.content}>{children}</BottomSheetView>
+        {enableDynamicSizing ? <BottomSheetView>{children}</BottomSheetView> : <View style={sheetStyles.content}>{children}</View>}
       </BottomSheetModal>
     );
   }

@@ -46,7 +46,15 @@ function getGreeting(): string {
 function RecentPatientCard({ patient, onPress }: { patient: IPatient; onPress: () => void }) {
   const { animatedStyle, onPressIn, onPressOut } = usePressSpring();
   const chipDate = formatChipDate(patient.updatedAt);
-  const pharmacistName = patient.pharmacistName[patient.pharmacistName.length - 1];
+  const names = patient.pharmacistName;
+  const pharmacistLabel =
+    names.length === 0
+      ? null
+      : names.length === 1
+        ? names[0]
+        : names.length === 2
+          ? `${names[0]} & ${names[1]}`
+          : `${names[0]} & ${names.length - 1} others`;
 
   return (
     <View style={styles.patientCard}>
@@ -64,9 +72,9 @@ function RecentPatientCard({ patient, onPress }: { patient: IPatient; onPress: (
           </View>
         ) : null}
       </View>
-      {pharmacistName ? (
+      {pharmacistLabel ? (
         <View style={styles.patientMetaRow}>
-          <Text style={styles.patientPharmacistText}>Attended by {pharmacistName}</Text>
+          <Text style={styles.patientPharmacistText}>Attended by {pharmacistLabel}</Text>
         </View>
       ) : null}
       <AnimatedPressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut} style={[styles.viewPatientBtn, animatedStyle]}>
@@ -468,7 +476,7 @@ const styles = StyleSheet.create({
   },
   datePillText: { fontFamily: fonts.bodySemiBold, fontSize: 11, color: colors.accent },
   patientMetaRow: { gap: 6 },
-  patientPharmacistText: { fontFamily: fonts.bodySemiBold, fontSize: 12, color: colors.text },
+  patientPharmacistText: { fontFamily: fonts.body, fontSize: 13, color: '#5F5A53' },
   viewPatientBtn: {
     height: 42,
     borderRadius: 14,
