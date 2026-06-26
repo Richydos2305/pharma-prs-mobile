@@ -1,21 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
-import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
+import Animated, {
+  cancelAnimation,
+  FadeInDown,
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  ZoomIn,
+  ZoomOut
+} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { useStaggerFadeIn } from '../../hooks/useStaggerFadeIn';
 import { useQuery } from '@tanstack/react-query';
 import type { BottomSheetModal } from '@gorhom/bottom-sheet';
-import { Filter, Plus, Search } from 'lucide-react-native';
+import { Filter, Plus, Search, SlidersHorizontal } from 'lucide-react-native';
 import { listPatients } from '../../api/patients';
 import { getMe } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
 import { Avatar, AnimatedPressable } from '../../components/ui';
 import { ScreenWrapper } from '../../components/layout';
 import { FilterSheet } from '../../components/patients/FilterSheet';
+import { SortSheet } from '../../components/patients/SortSheet';
 import { usePressSpring } from '../../hooks/usePressSpring';
-import type { FilterParams } from '../../components/patients/FilterSheet';
+import type { FilterParams, SortKey } from '../../components/patients/FilterSheet';
+import { getAllAppointmentDates, parseDateString } from '../../utils/getLastAppointmentDate';
 import { colors } from '../../theme/colors';
 import { fonts } from '../../theme/typography';
 import { spacing } from '../../theme/spacing';
@@ -24,7 +36,18 @@ import type { IPatient } from '../../types';
 
 type NavProp = NativeStackNavigationProp<PatientsStackParamList, 'PatientList'>;
 
-const DEFAULT_FILTER: FilterParams = { sort: 'newest' };
+const DEFAULT_FILTER: FilterParams = {};
+const DEFAULT_SORT: SortKey = 'newest';
+
+const SORT_LABELS: Record<SortKey, string> = {
+  newest: 'Newest',
+  oldest: 'Oldest',
+  updated: 'Updated',
+  'name-asc': 'A–Z',
+  'name-desc': 'Z–A',
+  'age-asc': 'Age ↑',
+  'age-desc': 'Age ↓'
+};
 
 function formatChipDate(dateStr: string): string {
   try {
@@ -38,7 +61,15 @@ function formatChipDate(dateStr: string): string {
 function PatientCardItem({ item, index, onPress }: { item: IPatient; index: number; onPress: () => void }) {
   const { animatedStyle, onPressIn, onPressOut } = usePressSpring();
   const chipDate = formatChipDate(item.updatedAt);
-  const pharmacistName = item.pharmacistName[item.pharmacistName.length - 1];
+  const names = item.pharmacistName;
+  const pharmacistLabel =
+    names.length === 0
+      ? null
+      : names.length === 1
+        ? names[0]
+        : names.length === 2
+          ? `${names[0]} & ${names[1]}`
+          : `${names[0]} & ${names.length - 1} others`;
 
   const entering =
     index < 5
@@ -65,9 +96,9 @@ function PatientCardItem({ item, index, onPress }: { item: IPatient; index: numb
           ) : null}
         </View>
 
-        {pharmacistName ? (
+        {pharmacistLabel ? (
           <View style={styles.cardMeta}>
-            <Text style={styles.cardMetaText}>Attended by {pharmacistName}</Text>
+            <Text style={styles.cardMetaText}>Attended by {pharmacistLabel}</Text>
           </View>
         ) : null}
 
@@ -82,10 +113,12 @@ function PatientCardItem({ item, index, onPress }: { item: IPatient; index: numb
 export function PatientListScreen() {
   const navigation = useNavigation<NavProp>();
   const filterSheetRef = useRef<BottomSheetModal>(null);
+  const sortSheetRef = useRef<BottomSheetModal>(null);
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterParams, setFilterParams] = useState<FilterParams>(DEFAULT_FILTER);
+  const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_SORT);
   const [s0, s1, s2, s3, s4, s5] = useStaggerFadeIn(6);
 
   const { animatedStyle: addBtnStyle, onPressIn: addBtnPressIn, onPressOut: addBtnPressOut } = usePressSpring();
@@ -112,42 +145,87 @@ export function PatientListScreen() {
   const filtered = useMemo(() => {
     // eslint-disable-next-line react-hooks/purity
     const now = Date.now();
-    const thisYear = new Date(now).getFullYear();
     return (patients ?? [])
       .filter((p) => {
         if (debouncedSearch) {
           const q = debouncedSearch.toLowerCase();
-          const matchesName = p.fullName.toLowerCase().includes(q);
-          const matchesPhone = p.phoneNumber?.toLowerCase().includes(q);
-          if (!matchesName && !matchesPhone) return false;
+          if (!p.fullName.toLowerCase().includes(q) && !p.phoneNumber?.toLowerCase().includes(q)) return false;
         }
-        if (filterParams.pharmacistName && !p.pharmacistName.includes(filterParams.pharmacistName)) return false;
         if (filterParams.ageGroup) {
           if (filterParams.ageGroup === 'under30' && p.age >= 30) return false;
           if (filterParams.ageGroup === '30-50' && (p.age < 30 || p.age > 50)) return false;
           if (filterParams.ageGroup === '51-70' && (p.age < 51 || p.age > 70)) return false;
           if (filterParams.ageGroup === '71plus' && p.age < 71) return false;
         }
-        if (filterParams.lastVisit) {
-          const ms = new Date(p.updatedAt).getTime();
-          if (filterParams.lastVisit === 'last30' && ms < now - 30 * 86400_000) return false;
-          if (filterParams.lastVisit === 'last90' && ms < now - 90 * 86400_000) return false;
-          if (filterParams.lastVisit === 'thisYear' && new Date(ms).getFullYear() < thisYear) return false;
+        if (filterParams.lastApptPreset || filterParams.lastApptFrom || filterParams.lastApptTo) {
+          const apptDates = getAllAppointmentDates(p);
+          if (apptDates.length === 0) return false;
+          if (filterParams.lastApptPreset) {
+            const cutoffs: Record<string, number> = { last7: 7, last14: 14, last30: 30, last3months: 90 };
+            const cutoff = now - cutoffs[filterParams.lastApptPreset] * 86_400_000;
+            if (!apptDates.some((d) => (parseDateString(d) ?? -Infinity) >= cutoff)) return false;
+          } else {
+            const fromMs = filterParams.lastApptFrom ? parseDateString(filterParams.lastApptFrom) : null;
+            const toMs = filterParams.lastApptTo ? (parseDateString(filterParams.lastApptTo) ?? 0) + 86_399_999 : null;
+            const hasInRange = apptDates.some((d) => {
+              const ms = parseDateString(d);
+              if (ms === null) return false;
+              return (fromMs === null || ms >= fromMs) && (toMs === null || ms <= toMs);
+            });
+            if (!hasInRange) return false;
+          }
+        }
+        if (filterParams.dateRegisteredPreset || filterParams.dateRegisteredFrom || filterParams.dateRegisteredTo) {
+          const regMs = new Date(p.createdAt).getTime();
+          if (filterParams.dateRegisteredPreset) {
+            const cutoffs: Record<string, number> = { last7: 7, last14: 14, last30: 30, last3months: 90 };
+            const cutoff = now - cutoffs[filterParams.dateRegisteredPreset] * 86_400_000;
+            if (regMs < cutoff) return false;
+          } else {
+            if (filterParams.dateRegisteredFrom && regMs < new Date(filterParams.dateRegisteredFrom).getTime()) return false;
+            if (filterParams.dateRegisteredTo && regMs > new Date(filterParams.dateRegisteredTo).getTime() + 86_399_999) return false;
+          }
+        }
+        if (filterParams.pharmacistNames && filterParams.pharmacistNames.length > 0) {
+          if (!filterParams.pharmacistNames.some((n) => p.pharmacistName.includes(n))) return false;
         }
         return true;
       })
       .sort((a, b) => {
-        const dateA = new Date(a.createdAt).getTime();
-        const dateB = new Date(b.createdAt).getTime();
-        return filterParams.sort === 'newest' ? dateB - dateA : dateA - dateB;
+        if (sortKey === 'oldest') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        if (sortKey === 'updated') return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        if (sortKey === 'name-asc') return a.fullName.localeCompare(b.fullName);
+        if (sortKey === 'name-desc') return b.fullName.localeCompare(a.fullName);
+        if (sortKey === 'age-asc') return a.age - b.age;
+        if (sortKey === 'age-desc') return b.age - a.age;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
-  }, [patients, debouncedSearch, filterParams]);
+  }, [patients, debouncedSearch, filterParams, sortKey]);
 
-  const hasActiveFilter = !!filterParams.pharmacistName || !!filterParams.ageGroup || !!filterParams.lastVisit;
+  const hasActiveFilter =
+    !!filterParams.ageGroup ||
+    !!(filterParams.lastApptPreset || filterParams.lastApptFrom || filterParams.lastApptTo) ||
+    !!(filterParams.dateRegisteredPreset || filterParams.dateRegisteredFrom || filterParams.dateRegisteredTo) ||
+    (filterParams.pharmacistNames?.length ?? 0) > 0;
 
-  function toggleSort() {
-    setFilterParams((p) => ({ ...p, sort: p.sort === 'newest' ? 'oldest' : 'newest' }));
-  }
+  const activeFilterCount =
+    (filterParams.ageGroup ? 1 : 0) +
+    (filterParams.lastApptPreset || filterParams.lastApptFrom || filterParams.lastApptTo ? 1 : 0) +
+    (filterParams.dateRegisteredPreset || filterParams.dateRegisteredFrom || filterParams.dateRegisteredTo ? 1 : 0) +
+    ((filterParams.pharmacistNames?.length ?? 0) > 0 ? 1 : 0);
+
+  const filterBadgeScale = useSharedValue(1);
+  const filterBadgeAnimStyle = useAnimatedStyle(() => ({ transform: [{ scale: filterBadgeScale.value }] }));
+
+  useEffect(() => {
+    if (activeFilterCount > 0) {
+      cancelAnimation(filterBadgeScale);
+      filterBadgeScale.value = withSequence(
+        withSpring(1.14, { stiffness: 400, damping: 20, reduceMotion: ReduceMotion.System }),
+        withSpring(1.0, { stiffness: 300, damping: 22, reduceMotion: ReduceMotion.System })
+      );
+    }
+  }, [activeFilterCount, filterBadgeScale]);
 
   function renderPatient({ item, index }: { item: IPatient; index: number }) {
     return <PatientCardItem item={item} index={index} onPress={() => navigation.navigate('PatientDetail', { patientId: item.id })} />;
@@ -206,10 +284,25 @@ export function PatientListScreen() {
             onPressIn={filterPressIn}
             onPressOut={filterPressOut}
           >
+            <SlidersHorizontal size={14} color={hasActiveFilter ? colors.white : colors.accent} strokeWidth={2} />
             <Text style={[styles.filterBtnText, hasActiveFilter && styles.filterBtnTextActive]}>Filter</Text>
+            {hasActiveFilter && (
+              <Animated.View
+                entering={ZoomIn.springify().reduceMotion(ReduceMotion.System)}
+                exiting={ZoomOut.duration(100).reduceMotion(ReduceMotion.System)}
+                style={[styles.filterCountBadge, filterBadgeAnimStyle]}
+              >
+                <Text style={styles.filterCountText}>{activeFilterCount}</Text>
+              </Animated.View>
+            )}
           </AnimatedPressable>
-          <AnimatedPressable style={[styles.sortBtn, sortBtnStyle]} onPress={toggleSort} onPressIn={sortPressIn} onPressOut={sortPressOut}>
-            <Text style={styles.sortBtnText}>Sort: {filterParams.sort === 'newest' ? 'Recent' : 'Oldest'}</Text>
+          <AnimatedPressable
+            style={[styles.sortBtn, sortBtnStyle]}
+            onPress={() => sortSheetRef.current?.present()}
+            onPressIn={sortPressIn}
+            onPressOut={sortPressOut}
+          >
+            <Text style={styles.sortBtnText}>Sort: {SORT_LABELS[sortKey]}</Text>
           </AnimatedPressable>
         </Animated.View>
 
@@ -239,9 +332,9 @@ export function PatientListScreen() {
             ListHeaderComponent={
               filtered.length > 0 ? (
                 <View style={styles.listHeader}>
-                  <Text style={styles.listHeaderTitle}>Recently updated</Text>
+                  <Text style={styles.listHeaderTitle}>Patient list</Text>
                   <View style={styles.sortBadge}>
-                    <Text style={styles.sortBadgeText}>{filterParams.sort === 'newest' ? 'Sorted by recent' : 'Sorted by oldest'}</Text>
+                    <Text style={styles.sortBadgeText}>{SORT_LABELS[sortKey]}</Text>
                   </View>
                 </View>
               ) : null
@@ -265,6 +358,7 @@ export function PatientListScreen() {
       </ScreenWrapper>
 
       <FilterSheet ref={filterSheetRef} current={filterParams} onApply={setFilterParams} onClose={() => filterSheetRef.current?.dismiss()} />
+      <SortSheet ref={sortSheetRef} current={sortKey} onApply={setSortKey} onClose={() => sortSheetRef.current?.dismiss()} />
     </>
   );
 }
@@ -318,14 +412,25 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 14,
     backgroundColor: '#F5F1E8',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     borderWidth: 1,
     borderColor: '#D8D1C1'
   },
   filterBtnActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   filterBtnText: { fontFamily: fonts.bodySemiBold, fontSize: 13, color: colors.accent },
   filterBtnTextActive: { color: colors.white },
+  filterCountBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  filterCountText: { fontFamily: fonts.bodySemiBold, fontSize: 11, color: colors.white },
   sortBtn: {
     flex: 1,
     height: 42,
@@ -356,7 +461,6 @@ const styles = StyleSheet.create({
   },
   addBtnText: { fontFamily: fonts.bodySemiBold, fontSize: 15, color: colors.background },
   // List
-  listWrapper: { flex: 1 },
   listFade: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 48 },
   list: { flex: 1 },
   listContent: {
