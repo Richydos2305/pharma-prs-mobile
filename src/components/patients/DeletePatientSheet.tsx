@@ -24,6 +24,7 @@ export const DeletePatientSheet = forwardRef<BottomSheetModal, DeletePatientShee
   async function handleDelete() {
     await deletePatient(patientId);
     queryClient.invalidateQueries({ queryKey: queryKeys.patients.all });
+    onClose();
     onDeleted();
   }
 

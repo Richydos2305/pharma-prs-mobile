@@ -54,3 +54,49 @@ jest.mock('@gorhom/bottom-sheet', () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   BottomSheetModal: jest.fn(({ children }: { children: React.ReactNode }) => children) as any
 }));
+
+jest.mock('@react-navigation/native', () => ({
+  ...jest.requireActual('@react-navigation/native'),
+  useIsFocused: jest.fn(() => true)
+}));
+
+jest.mock('../contexts/SyncContext', () => ({
+  useSync: jest.fn(() => ({ isOnline: true, isSyncing: false, isOfflineIconVisible: false, pendingCount: 0, lastSyncedAt: null })),
+  SyncProvider: ({ children }: { children: React.ReactNode }) => children
+}));
+
+jest.mock('../contexts/ToastContext', () => ({
+  useToast: jest.fn(() => ({ showToast: jest.fn() })),
+  ToastProvider: ({ children }: { children: React.ReactNode }) => children
+}));
+
+jest.mock('../hooks/useAuth', () => ({
+  useAuth: jest.fn(() => ({
+    user: { id: 'test-user-id', fullName: 'Test User', email: 'test@test.com' },
+    isAuthenticated: true,
+    login: jest.fn(),
+    logout: jest.fn()
+  }))
+}));
+
+jest.mock('expo-sqlite', () => ({
+  openDatabaseAsync: jest.fn().mockResolvedValue({
+    execAsync: jest.fn().mockResolvedValue(undefined),
+    runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 0, changes: 1 }),
+    getFirstAsync: jest.fn().mockResolvedValue(null),
+    getAllAsync: jest.fn().mockResolvedValue([]),
+    withTransactionAsync: jest.fn().mockImplementation((fn: () => Promise<void>) => fn())
+  })
+}));
+
+jest.mock('expo-network', () => ({
+  getNetworkStateAsync: jest.fn().mockResolvedValue({ isConnected: true, isInternetReachable: true }),
+  addNetworkStateListener: jest.fn().mockReturnValue({ remove: jest.fn() })
+}));
+
+jest.mock('expo-file-system/legacy', () => ({
+  documentDirectory: '/mock-dir/',
+  makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
+  copyAsync: jest.fn().mockResolvedValue(undefined),
+  deleteAsync: jest.fn().mockResolvedValue(undefined)
+}));

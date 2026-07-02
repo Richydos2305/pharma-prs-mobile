@@ -3,7 +3,8 @@ import { PatientListScreen } from '../../../screens/patients/PatientListScreen';
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: jest.fn(),
-  useFocusEffect: jest.fn()
+  useFocusEffect: jest.fn(),
+  useIsFocused: jest.fn(() => true)
 }));
 
 jest.mock('@tanstack/react-query', () => ({ useQuery: jest.fn() }));
@@ -39,9 +40,10 @@ const mockPatients = [
 ];
 
 const mockNavigate = jest.fn();
+const mockParentNavigate = jest.fn();
 
 function mockQueryWithPatients(patients = mockPatients) {
-  (useNavigation as jest.Mock).mockReturnValue({ navigate: mockNavigate });
+  (useNavigation as jest.Mock).mockReturnValue({ navigate: mockNavigate, getParent: () => ({ navigate: mockParentNavigate }) });
   (useQuery as jest.Mock).mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
     const key = String(queryKey[0]);
     if (key === 'patients') return { data: patients, isLoading: false, isRefetching: false, refetch: jest.fn() };
@@ -101,7 +103,7 @@ describe('PatientListScreen', () => {
 
     fireEvent.press(screen.getByText('Add New Patient'));
 
-    expect(mockNavigate).toHaveBeenCalledWith('PatientNew');
+    expect(mockParentNavigate).toHaveBeenCalledWith('PlusTab');
   });
 
   it('navigates to PatientDetail when View Patient is pressed', () => {

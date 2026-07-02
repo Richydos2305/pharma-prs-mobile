@@ -10,7 +10,7 @@ export const CORE_TOP_LEVEL: Record<string, string> = {
 export const ATTENDED_BY_FIELD_ID = 'core-attended-to-by';
 
 export type MobilePendingFile = { uri: string; mimeType?: string; name: string };
-export type MobileFileFieldState = { existing: FileMetadata[]; pending: MobilePendingFile | null };
+export type MobileFileFieldState = { existing: FileMetadata[]; pending: MobilePendingFile[] };
 
 export function findPatientSection(patient: IPatient, sectionId: string): PatientCustomFieldsSection | undefined {
   return patient.customFields?.sections?.find((s) => s.name === sectionId);
@@ -65,7 +65,7 @@ export function hydrateStandardFileState(schema: FormSchema, patient: IPatient):
       const val = row?.[field.id];
       state[field.id] = {
         existing: Array.isArray(val) ? (val as FileMetadata[]) : [],
-        pending: null
+        pending: []
       };
     }
   }
@@ -86,7 +86,7 @@ export function hydrateRepeatableFileState(schema: FormSchema, patient: IPatient
         const val = row[field.id];
         rowState[field.id] = {
           existing: Array.isArray(val) ? (val as FileMetadata[]) : [],
-          pending: null
+          pending: []
         };
       }
       return rowState;

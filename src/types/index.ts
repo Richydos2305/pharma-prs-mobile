@@ -4,6 +4,12 @@ export interface FileMetadata {
   name: string;
 }
 
+export interface PendingFileRef {
+  name: string;
+  localPath: string;
+  pending: true;
+}
+
 export interface IPharmacist {
   id: string;
   name: string;
@@ -11,7 +17,7 @@ export interface IPharmacist {
 }
 
 export interface IUser {
-  _id: string;
+  id: string;
   email: string;
   fullName: string;
   role: string;

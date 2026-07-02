@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { apiClient } from './client';
+import * as settingsLocalRepository from '../services/settingsLocalRepository';
 import type { FormSchema } from '../types/formBuilder';
 import type { OnboardingStatus } from '../types';
 
@@ -15,7 +16,7 @@ export async function getSettings(): Promise<SettingsData | null> {
     const { data } = await apiClient.get<{ data: SettingsData }>('/api/settings');
     return data.data;
   } catch {
-    return null;
+    return settingsLocalRepository.getSettings();
   }
 }
 

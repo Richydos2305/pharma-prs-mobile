@@ -15,7 +15,7 @@ jest.mock('../../../api/users', () => ({
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 const mockUser = {
-  _id: 'u1',
+  id: 'u1',
   email: 'ama@northridgepharmacy.com',
   fullName: 'Ama K. Obeng',
   role: 'Owner',

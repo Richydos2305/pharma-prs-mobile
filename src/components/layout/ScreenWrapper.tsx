@@ -2,6 +2,7 @@ import { ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Edge } from 'react-native-safe-area-context';
 import { colors } from '../../theme/colors';
+import { GlowBackground } from './GlowBackground';
 
 // Height of the custom floating tab bar + its bottom padding
 const TAB_BAR_HEIGHT = 64 + 12 + 12; // bar height + wrapper paddingBottom + extra
@@ -21,6 +22,7 @@ export function ScreenWrapper({ children, scrollable = false, edges = ['top'], c
   if (scrollable) {
     return (
       <SafeAreaView style={styles.flex} edges={edges}>
+        <GlowBackground />
         <ScrollView
           style={styles.flex}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 32 + bottomPad }, contentStyle]}
@@ -35,6 +37,7 @@ export function ScreenWrapper({ children, scrollable = false, edges = ['top'], c
 
   return (
     <SafeAreaView style={[styles.flex, styles.safeArea, { paddingBottom: bottomPad }, contentStyle]} edges={edges}>
+      <GlowBackground />
       {children}
     </SafeAreaView>
   );

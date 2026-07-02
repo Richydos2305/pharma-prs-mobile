@@ -1,16 +1,17 @@
-import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 
 interface KeyboardAvoidingWrapperProps {
   children: React.ReactNode;
 }
 
 export function KeyboardAvoidingWrapper({ children }: KeyboardAvoidingWrapperProps) {
+  // On Android, the OS handles keyboard avoidance natively via windowSoftInputMode=adjustResize.
+  // KeyboardAvoidingView with behavior="height" fights that and causes scroll layout issues.
+  if (Platform.OS === 'android') {
+    return <View style={styles.flex}>{children}</View>;
+  }
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-    >
+    <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={0}>
       {children}
     </KeyboardAvoidingView>
   );

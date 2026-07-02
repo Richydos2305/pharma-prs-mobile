@@ -22,7 +22,7 @@ import { listPatients } from '../../api/patients';
 import { getMe } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
 import { Avatar, AnimatedPressable } from '../../components/ui';
-import { ScreenWrapper } from '../../components/layout';
+import { OfflineIcon, ScreenWrapper } from '../../components/layout';
 import { FilterSheet } from '../../components/patients/FilterSheet';
 import { SortSheet } from '../../components/patients/SortSheet';
 import { usePressSpring } from '../../hooks/usePressSpring';
@@ -256,7 +256,10 @@ export function PatientListScreen() {
         {/* Hero */}
         <Animated.View style={[styles.header, s1]}>
           <Text style={styles.count}>{filtered.length} total records</Text>
-          <Text style={styles.title}>Patients</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>Patients</Text>
+            <OfflineIcon />
+          </View>
         </Animated.View>
 
         {/* Search */}
@@ -311,7 +314,7 @@ export function PatientListScreen() {
           <Text style={styles.quickActionLabel}>Quick action</Text>
           <AnimatedPressable
             style={[styles.addBtn, addBtnStyle]}
-            onPress={() => navigation.navigate('PatientNew')}
+            onPress={() => navigation.getParent()?.navigate('PlusTab' as never)}
             onPressIn={addBtnPressIn}
             onPressOut={addBtnPressOut}
           >
@@ -384,6 +387,7 @@ const styles = StyleSheet.create({
   avatarInitials: { fontFamily: fonts.bodySemiBold, fontSize: 12, color: '#F8F3E8' },
   // Hero
   header: { paddingHorizontal: spacing.base, paddingTop: spacing.xs, gap: 4 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   count: { fontFamily: fonts.body, fontSize: 13, color: colors.textMuted },
   title: { fontFamily: 'FunnelSans-Bold', fontWeight: '700', fontSize: 30, lineHeight: 32, color: colors.text },
   // Search

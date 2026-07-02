@@ -6,9 +6,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useStaggerFadeIn } from '../../hooks/useStaggerFadeIn';
 import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { Plus, Trash2, Users } from 'lucide-react-native';
-import { listPharmacists } from '../../api/pharmacists';
 import { getMe } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
+import { usePharmacists } from '../../hooks/usePharmacists';
 import { Avatar, AnimatedPressable, SuccessCheck } from '../../components/ui';
 import { ScreenWrapper } from '../../components/layout';
 import { AddPharmacistSheet } from '../../components/pharmacists/AddPharmacistSheet';
@@ -112,15 +112,7 @@ export function PharmacistsScreen() {
 
   const { data: user } = useQuery({ queryKey: queryKeys.me, queryFn: getMe });
 
-  const {
-    data: pharmacists,
-    isLoading,
-    isError,
-    refetch
-  } = useQuery({
-    queryKey: queryKeys.pharmacists,
-    queryFn: listPharmacists
-  });
+  const { data: pharmacists, isLoading, isError, refetch } = usePharmacists();
 
   const list = useMemo(() => pharmacists ?? [], [pharmacists]);
 

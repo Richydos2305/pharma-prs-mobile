@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { Fragment, useRef } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -7,17 +7,18 @@ import { ChevronLeft, FileText } from 'lucide-react-native';
 import { getPatient } from '../../api/patients';
 import { getSettings } from '../../api/settings';
 import { queryKeys } from '../../api/queryKeys';
-import { ScreenWrapper } from '../../components/layout';
+import { OfflineIcon, ScreenWrapper } from '../../components/layout';
 import { AnimatedPressable } from '../../components/ui';
 import { DeletePatientSheet } from '../../components/patients/DeletePatientSheet';
 import { usePressSpring } from '../../hooks/usePressSpring';
+import { useSync } from '../../contexts/SyncContext';
 import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { colors } from '../../theme/colors';
 import { fonts } from '../../theme/typography';
 import { spacing } from '../../theme/spacing';
 import { buildDefaultTemplate } from '../../types/formBuilder';
 import type { FieldSchema, FormSchema } from '../../types/formBuilder';
-import type { IPatient } from '../../types';
+import type { IPatient, PendingFileRef } from '../../types';
 import type { PatientsStackParamList } from '../../navigation/types';
 import { hydrateRepeatableSectionRows, hydrateStandardSectionValues } from '../../utils/patientFormSerialization';
 import { formatDateForDisplay } from '../../utils/getLastAppointmentDate';
@@ -54,44 +55,62 @@ function FieldBox({ label, value, multiline }: FieldBoxProps) {
   );
 }
 
-function getRawFileMetadata(patient: IPatient, sectionId: string, fieldId: string, rowIndex = 0): { name?: string; url?: string } | null {
+function getRawFileMetadataList(
+  patient: IPatient,
+  sectionId: string,
+  fieldId: string,
+  rowIndex = 0
+): Array<{ name?: string; url?: string; localPath?: string }> {
   const section = patient.customFields?.sections?.find((s) => s.name === sectionId);
   const row = section?.fields?.[rowIndex];
-  if (!row) return null;
+  if (!row) return [];
   const val = row[fieldId];
-  if (val == null) return null;
-  // Legacy: value is a plain string (filename or device URI written by old code).
+  if (val == null) return [];
   if (typeof val === 'string') {
-    return val ? { name: val.split('/').pop() } : null;
+    return val ? [{ name: val.split('/').pop() }] : [];
   }
-  if (typeof val !== 'object') return null;
-  const item = Array.isArray(val) ? (val as Array<{ name?: string; url?: string }>)[0] : (val as { name?: string; url?: string });
-  return item ?? null;
+  if (typeof val !== 'object') return [];
+  const items = Array.isArray(val)
+    ? (val as Array<{ name?: string; url?: string } | PendingFileRef>)
+    : [val as { name?: string; url?: string } | PendingFileRef];
+  return items.filter(Boolean).map((item) => {
+    if ('pending' in item && item.pending === true) {
+      return { name: (item as PendingFileRef).name, localPath: (item as PendingFileRef).localPath };
+    }
+    return item as { name?: string; url?: string };
+  });
 }
 
 interface FileFieldBoxProps {
   label: string;
   name: string | null;
   url?: string;
+  localPath?: string;
 }
 
-function FileFieldBox({ label, name, url }: FileFieldBoxProps) {
-  if (!name && !url) return null;
+function FileFieldBox({ label, name, url, localPath }: FileFieldBoxProps) {
+  if (!name && !url && !localPath) return null;
   const displayName = name || 'Attached file';
+  const isPending = !url && !!localPath;
+  const isInteractive = !!url || isPending;
   return (
     <Pressable
-      style={({ pressed }) => [styles.fieldBox, pressed && url ? { opacity: 0.75 } : null]}
+      style={({ pressed }) => [styles.fieldBox, pressed && isInteractive ? { opacity: 0.75 } : null]}
       onPress={() => {
-        if (url) Linking.openURL(url);
+        const target = url ?? localPath;
+        if (target) void Linking.openURL(target).catch(() => undefined);
       }}
-      disabled={!url}
+      disabled={!isInteractive}
     >
       <Text style={styles.fieldBoxLabel}>{label}</Text>
       <View style={styles.fileRow}>
-        <FileText size={14} color={colors.accent} />
-        <Text style={[styles.fieldBoxValue, url ? styles.fieldBoxValueLink : null]} numberOfLines={1}>
-          {displayName}
-        </Text>
+        <FileText size={14} color={isPending ? colors.textMuted : colors.accent} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.fieldBoxValue, url ? styles.fieldBoxValueLink : null]} numberOfLines={1}>
+            {displayName}
+          </Text>
+          {isPending && <Text style={styles.filePendingLabel}>Upload pending</Text>}
+        </View>
       </View>
     </Pressable>
   );
@@ -101,6 +120,7 @@ export function PatientDetailScreen({ route, navigation }: Props) {
   const { patientId } = route.params;
   const deleteSheetRef = useRef<BottomSheetModal>(null);
 
+  const { isOnline } = useSync();
   const { animatedStyle: backBtnStyle, onPressIn: backPressIn, onPressOut: backPressOut } = usePressSpring(0.96);
   const { animatedStyle: editBtnStyle, onPressIn: editPressIn, onPressOut: editPressOut } = usePressSpring();
   const { animatedStyle: deleteBtnStyle, onPressIn: deletePressIn, onPressOut: deletePressOut } = usePressSpring();
@@ -127,8 +147,24 @@ export function PatientDetailScreen({ route, navigation }: Props) {
 
   function renderField(field: FieldSchema, sectionId: string, hydratedValue: string, rowIndex?: number) {
     if (field.type === 'file') {
-      const meta = getRawFileMetadata(patient!, sectionId, field.id, rowIndex ?? 0);
-      return <FileFieldBox key={field.id} label={field.label} name={meta?.name ?? hydratedValue ?? null} url={meta?.url} />;
+      const metas = getRawFileMetadataList(patient!, sectionId, field.id, rowIndex ?? 0);
+      if (metas.length === 0) {
+        if (!hydratedValue) return null;
+        return <FileFieldBox key={field.id} label={field.label} name={hydratedValue} />;
+      }
+      return (
+        <Fragment key={field.id}>
+          {metas.map((meta, i) => (
+            <FileFieldBox
+              key={`${field.id}-${i}`}
+              label={i === 0 ? field.label : ''}
+              name={meta.name ?? null}
+              url={meta.url}
+              localPath={meta.localPath}
+            />
+          ))}
+        </Fragment>
+      );
     }
     const displayValue = field.type === 'date' ? formatDateForDisplay(hydratedValue) : hydratedValue;
     return <FieldBox key={field.id} label={field.label} value={displayValue} multiline={field.type === 'textarea'} />;
@@ -147,7 +183,7 @@ export function PatientDetailScreen({ route, navigation }: Props) {
           <ChevronLeft size={16} color={colors.accent} />
           <Text style={styles.backText}>Patients</Text>
         </AnimatedPressable>
-        <Text style={styles.navMeta}>{updatedMeta}</Text>
+        {isOnline ? <Text style={styles.navMeta}>{updatedMeta}</Text> : <OfflineIcon />}
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -325,6 +361,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm
+  },
+  filePendingLabel: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2
   },
   // Actions section
   actionsSection: {

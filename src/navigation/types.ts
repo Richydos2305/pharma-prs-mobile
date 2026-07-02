@@ -13,7 +13,6 @@ export type AuthStackParamList = {
 export type PatientsStackParamList = {
   PatientList: undefined;
   PatientDetail: { patientId: string };
-  PatientNew: undefined;
   PatientEdit: { patientId: string };
 };
 
