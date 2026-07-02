@@ -32,6 +32,7 @@ import { generateLocalId } from '../../services/localId';
 import type { CreatePatientPayload, IPatient, PendingFileRef } from '../../types';
 import type { AppTabParamList } from '../../navigation/types';
 import { buildCustomFieldsSections, hasAttendedByValue } from '../../utils/patientFormSerialization';
+import { formatDateForDisplay } from '../../utils/getLastAppointmentDate';
 import type { MobileFileFieldState, MobilePendingFile } from '../../utils/patientFormSerialization';
 
 type Props = BottomTabScreenProps<AppTabParamList, 'PlusTab'>;
@@ -540,7 +541,9 @@ export function PatientNewScreen({ navigation }: Props) {
                 {field.label}
                 {field.required ? ' *' : ''}
               </Text>
-              <Text style={[styles.fieldBoxInput, !selectedDate && styles.fieldBoxInputPlaceholder]}>{selectedDate || 'Select date...'}</Text>
+              <Text style={[styles.fieldBoxInput, !selectedDate && styles.fieldBoxInputPlaceholder]}>
+                {selectedDate ? formatDateForDisplay(selectedDate) : 'Select date...'}
+              </Text>
             </View>
             <CalendarDays size={16} color={colors.textMuted} />
           </Pressable>
@@ -665,7 +668,9 @@ export function PatientNewScreen({ navigation }: Props) {
           >
             <View style={styles.fieldBoxSelectLeft}>
               <Text style={styles.fieldBoxLabel}>{field.label}</Text>
-              <Text style={[styles.fieldBoxInput, !selectedDate && styles.fieldBoxInputPlaceholder]}>{selectedDate || 'Select date...'}</Text>
+              <Text style={[styles.fieldBoxInput, !selectedDate && styles.fieldBoxInputPlaceholder]}>
+                {selectedDate ? formatDateForDisplay(selectedDate) : 'Select date...'}
+              </Text>
             </View>
             <CalendarDays size={16} color={colors.textMuted} />
           </Pressable>
@@ -839,7 +844,7 @@ export function PatientNewScreen({ navigation }: Props) {
               return;
             }
             if (date) {
-              writeDateValue(date.toLocaleDateString('en-GB'));
+              writeDateValue(date.toISOString().split('T')[0]);
             }
             setDatePickerCtx(null);
           }}
