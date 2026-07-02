@@ -15,6 +15,7 @@
     },
     "android": {
       "package": "com.pharmaprs.mobile",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -26,7 +27,7 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-secure-store", "expo-font", "@react-native-community/datetimepicker"],
+    "plugins": ["expo-secure-store", "expo-font", "@react-native-community/datetimepicker", "expo-sqlite"],
     "extra": {
       "eas": {
         "projectId": "583f5398-39c7-47a5-bb67-2a1dd09fe636"

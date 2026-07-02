@@ -11,10 +11,10 @@ import { useQuery } from '@tanstack/react-query';
 import { Users } from 'lucide-react-native';
 import { getSettings } from '../../api/settings';
 import { listPatients } from '../../api/patients';
-import { getMe } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
+import { useAuth } from '../../hooks/useAuth';
 import { Avatar, AnimatedPressable } from '../../components/ui';
-import { ScreenWrapper } from '../../components/layout';
+import { OfflineIcon, ScreenWrapper } from '../../components/layout';
 import { usePressSpring } from '../../hooks/usePressSpring';
 import { colors } from '../../theme/colors';
 import { fonts } from '../../theme/typography';
@@ -79,11 +79,11 @@ function RecentPatientCard({ patient, onPress }: { patient: IPatient; onPress: (
 export function DashboardScreen() {
   const navigation = useNavigation<DashboardNavigationProp>();
 
+  const { user } = useAuth();
   const { data: settings, isLoading: settingsLoading } = useQuery({ queryKey: queryKeys.settings, queryFn: getSettings });
   const { data: patients, isLoading: patientsLoading } = useQuery({ queryKey: queryKeys.patients.all, queryFn: () => listPatients() });
-  const { data: user, isLoading: meLoading } = useQuery({ queryKey: queryKeys.me, queryFn: getMe });
 
-  const isLoading = settingsLoading || patientsLoading || meLoading;
+  const isLoading = settingsLoading || patientsLoading;
 
   const [s0, s1, s2, s3, s4] = useStaggerFadeIn(5, !isLoading);
 
@@ -124,7 +124,7 @@ export function DashboardScreen() {
   }
 
   const allPatients = patients ?? [];
-  const recentPatients = allPatients.slice(-3).reverse();
+  const recentPatients = [...allPatients].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 3);
   const onboardingComplete = settings?.onboarding?.allComplete ?? false;
   const steps = settings?.onboarding?.steps;
   const firstName = user?.fullName?.split(' ')[0] ?? '';
@@ -161,7 +161,7 @@ export function DashboardScreen() {
       desc: 'Create your first patient record',
       done: steps?.firstPatientAdded ?? false,
       cta: 'Add',
-      onPress: () => navigation.navigate('Patients', { screen: 'PatientNew' })
+      onPress: () => navigation.navigate('PlusTab')
     }
   ];
 
@@ -185,7 +185,10 @@ export function DashboardScreen() {
               {getGreeting()}
               {firstName ? `, ${firstName}` : ''}
             </Text>
-            <Text style={styles.pageTitle}>Dashboard</Text>
+            <View style={styles.heroTitleRow}>
+              <Text style={styles.pageTitle}>Dashboard</Text>
+              <OfflineIcon />
+            </View>
           </RNAnimated.View>
 
           {/* Onboarding card */}
@@ -244,7 +247,7 @@ export function DashboardScreen() {
           <RNAnimated.View style={[styles.quickActions, s3]}>
             <Text style={styles.quickActionsTitle}>Quick Actions</Text>
             <AnimatedPressable
-              onPress={() => navigation.navigate('Patients', { screen: 'PatientNew' })}
+              onPress={() => navigation.navigate('PlusTab')}
               onPressIn={primaryPressIn}
               onPressOut={primaryPressOut}
               style={[styles.primaryBtn, primaryBtnStyle]}
@@ -325,6 +328,7 @@ const styles = StyleSheet.create({
   companyName: { fontFamily: fonts.bodySemiBold, fontSize: 14, color: colors.text },
   // Hero
   hero: { gap: 4 },
+  heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   greeting: { fontFamily: fonts.body, fontSize: 13, color: colors.textMuted },
   pageTitle: { fontFamily: 'FunnelSans-Bold', fontWeight: '700', fontSize: 30, lineHeight: 32, color: colors.text },
   // Card base

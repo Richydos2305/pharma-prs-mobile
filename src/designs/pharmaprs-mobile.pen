@@ -1,5 +1,5 @@
 {
-  "version": "2.13",
+  "version": "2.14",
   "children": [
     {
       "type": "frame",
@@ -34848,7 +34848,8 @@
                   "fill": "#2C2825",
                   "content": "Male",
                   "fontFamily": "Funnel Sans",
-                  "fontSize": 15
+                  "fontSize": 15,
+                  "fontWeight": "normal"
                 }
               ]
             },
@@ -34908,7 +34909,8 @@
                   "fill": "#2C2825",
                   "content": "Non-binary",
                   "fontFamily": "Funnel Sans",
-                  "fontSize": 15
+                  "fontSize": 15,
+                  "fontWeight": "normal"
                 }
               ]
             },
@@ -34932,7 +34934,8 @@
                   "fill": "#2C2825",
                   "content": "Prefer not to say",
                   "fontFamily": "Funnel Sans",
-                  "fontSize": 15
+                  "fontSize": 15,
+                  "fontWeight": "normal"
                 }
               ]
             }
@@ -36081,5 +36084,6 @@
       "type": "color",
       "value": "#000000"
     }
-  }
+  },
+  "fileToken": "60e01121-9d5f-47d9-b789-dc340e0c5068"
 }

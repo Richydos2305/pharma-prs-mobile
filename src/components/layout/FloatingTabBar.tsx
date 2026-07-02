@@ -5,6 +5,7 @@ import { House, Pill, Plus, User, Users } from 'lucide-react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { AnimatedPressable } from '../ui/AnimatedPressable';
 import { usePressSpring } from '../../hooks/usePressSpring';
+import { useSync } from '../../contexts/SyncContext';
 import { colors } from '../../theme/colors';
 import { fonts } from '../../theme/typography';
 
@@ -15,6 +16,8 @@ const TAB_CONFIG: Record<string, { Icon: React.ComponentType<{ size: number; col
   Pharmacists: { Icon: Pill, label: 'Pharmacists' },
   Profile: { Icon: User, label: 'Profile' }
 };
+
+const OFFLINE_TAB_ORDER = ['Dashboard', 'PlusTab', 'Patients'];
 
 interface FloatingTabBarProps {
   activeRoute?: string;
@@ -51,10 +54,15 @@ function TabItem({
 }
 
 export function FloatingTabBar({ activeRoute, onTabPress }: FloatingTabBarProps) {
+  const { isSyncing, isOnline } = useSync();
   const pillX = useSharedValue(0);
   const pillWidth = useSharedValue(0);
   const layoutsRef = useRef<Partial<Record<string, { x: number; width: number }>>>({});
   const initializedRef = useRef(false);
+
+  const visibleTabs = isOnline
+    ? Object.entries(TAB_CONFIG)
+    : OFFLINE_TAB_ORDER.map((name) => [name, TAB_CONFIG[name]] as [string, (typeof TAB_CONFIG)[string]]);
 
   const pillStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: pillX.value }],
@@ -62,7 +70,10 @@ export function FloatingTabBar({ activeRoute, onTabPress }: FloatingTabBarProps)
   }));
 
   useEffect(() => {
-    if (!activeRoute) return;
+    if (!activeRoute) {
+      pillWidth.value = withSpring(0, { damping: 60, stiffness: 460 });
+      return;
+    }
     const layout = layoutsRef.current[activeRoute];
     if (!layout) return;
     if (!initializedRef.current) {
@@ -85,27 +96,36 @@ export function FloatingTabBar({ activeRoute, onTabPress }: FloatingTabBarProps)
   }
 
   return (
-    <BlurView intensity={60} tint="light" style={styles.blurView}>
-      <View style={styles.tabBar}>
-        <Animated.View style={[styles.pill, pillStyle]} />
-        {Object.entries(TAB_CONFIG).map(([routeName, { Icon, label }]) => (
-          <View
-            key={routeName}
-            onLayout={(e) => {
-              const { x, width } = e.nativeEvent.layout;
-              layoutsRef.current[routeName] = { x, width };
-              if (routeName === activeRoute && !initializedRef.current) {
-                pillX.value = x;
-                pillWidth.value = width;
-                initializedRef.current = true;
-              }
-            }}
-          >
-            <TabItem Icon={Icon} label={label} isFocused={activeRoute === routeName} onPress={() => handleTabTap(routeName)} />
-          </View>
-        ))}
-      </View>
-    </BlurView>
+    <View>
+      <BlurView intensity={60} tint="light" style={styles.blurView}>
+        <View style={styles.tabBar}>
+          <Animated.View style={[styles.pill, pillStyle]} />
+          {visibleTabs.map(([routeName, { Icon, label }]) => (
+            <View
+              key={routeName}
+              style={!isOnline ? styles.tabFlex : undefined}
+              onLayout={(e) => {
+                const { x, width } = e.nativeEvent.layout;
+                const prev = layoutsRef.current[routeName];
+                layoutsRef.current[routeName] = { x, width };
+                if (routeName !== activeRoute) return;
+                if (!initializedRef.current) {
+                  pillX.value = x;
+                  pillWidth.value = width;
+                  initializedRef.current = true;
+                } else if (!prev || prev.x !== x || prev.width !== width) {
+                  pillX.value = withSpring(x, { damping: 60, stiffness: 460 });
+                  pillWidth.value = withSpring(width, { damping: 60, stiffness: 460 });
+                }
+              }}
+            >
+              <TabItem Icon={Icon} label={label} isFocused={activeRoute === routeName} onPress={() => handleTabTap(routeName)} />
+            </View>
+          ))}
+        </View>
+      </BlurView>
+      {isSyncing && <View style={styles.syncDot} pointerEvents="none" />}
+    </View>
   );
 }
 
@@ -149,5 +169,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bodySemiBold,
     color: colors.accent,
     fontWeight: '600'
+  },
+  tabFlex: {
+    flex: 1,
+    alignItems: 'center'
+  },
+  syncDot: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#D4A017'
   }
 });

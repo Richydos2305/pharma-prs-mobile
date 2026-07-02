@@ -26,12 +26,24 @@ jest.mock('../../navigation/AppNavigator', () => ({
   }
 }));
 
+jest.mock('../../screens/OfflineWallScreen', () => ({
+  OfflineWallScreen: () => {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const React = require('react');
+    const { View } = require('react-native');
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    return React.createElement(View, { testID: 'offline-wall' });
+  }
+}));
+
 import { useAuth } from '../../hooks/useAuth';
 
-function mockAuth(overrides: { isLoading?: boolean; isAuthenticated?: boolean } = {}) {
+function mockAuth(overrides: { isLoading?: boolean; isAuthenticated?: boolean; requiresOnline?: boolean } = {}) {
   (useAuth as jest.Mock).mockReturnValue({
     isLoading: false,
     isAuthenticated: false,
+    requiresOnline: false,
+    clearOfflineWall: jest.fn(),
     user: null,
     login: jest.fn(),
     logout: jest.fn(),
@@ -78,5 +90,14 @@ describe('RootNavigator', () => {
 
     expect(screen.getByTestId('app-navigator')).toBeTruthy();
     expect(screen.queryByTestId('auth-navigator')).toBeNull();
+  });
+
+  it('renders OfflineWallScreen when authenticated but requiresOnline is true', () => {
+    mockAuth({ isLoading: false, isAuthenticated: true, requiresOnline: true });
+
+    render(<RootNavigator />);
+
+    expect(screen.getByTestId('offline-wall')).toBeTruthy();
+    expect(screen.queryByTestId('app-navigator')).toBeNull();
   });
 });

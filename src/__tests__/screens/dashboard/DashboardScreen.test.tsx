@@ -6,7 +6,8 @@ import type { OnboardingSteps } from '../../../types';
 const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockNavigate, getParent: () => ({ navigate: mockNavigate }) }),
-  useFocusEffect: jest.fn()
+  useFocusEffect: jest.fn(),
+  useIsFocused: jest.fn(() => true)
 }));
 
 // ── React Query ──────────────────────────────────────────────────────────────
@@ -23,7 +24,7 @@ import { useQuery } from '@tanstack/react-query';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const mockUser = { _id: 'u1', email: 'a@b.com', fullName: 'Anna Blake', role: 'Owner', companyName: 'Test Pharmacy' };
+const mockUser = { id: 'u1', email: 'a@b.com', fullName: 'Anna Blake', role: 'Owner', companyName: 'Test Pharmacy' };
 
 const allDoneSteps: OnboardingSteps = {
   profileComplete: true,
@@ -48,8 +49,8 @@ const mockPatients = [
     pharmacistName: ['NJ'],
     userId: 'u1',
     customFields: { sections: [] },
-    createdAt: '',
-    updatedAt: ''
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z'
   },
   {
     id: 'p2',
@@ -59,8 +60,8 @@ const mockPatients = [
     pharmacistName: ['LV'],
     userId: 'u1',
     customFields: { sections: [] },
-    createdAt: '',
-    updatedAt: ''
+    createdAt: '2024-06-01T00:00:00Z',
+    updatedAt: '2024-06-01T00:00:00Z'
   }
 ];
 
@@ -187,7 +188,7 @@ describe('DashboardScreen', () => {
 
     fireEvent.press(screen.getByText('Add your first patient'));
 
-    expect(mockNavigate).toHaveBeenCalledWith('Patients', { screen: 'PatientNew' });
+    expect(mockNavigate).toHaveBeenCalledWith('PlusTab');
   });
 
   it('navigates to Pharmacists when the Add a pharmacist step is tapped', () => {
@@ -218,7 +219,7 @@ describe('DashboardScreen', () => {
     // Patient names are visible
     expect(screen.getByText('Akin Kisi')).toBeTruthy();
 
-    // slice(-5).reverse() → p2 is first (most recently added), p1 is second
+    // sort by updatedAt DESC → p2 (Jun 2024) is first, p1 (Jan 2024) is second
     fireEvent.press(screen.getAllByText('View Patient')[0]);
 
     expect(mockNavigate).toHaveBeenCalledWith('Patients', {

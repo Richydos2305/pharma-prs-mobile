@@ -4,7 +4,8 @@ import { PatientNewScreen } from '../../../screens/patients/PatientNewScreen';
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: jest.fn(),
-  useFocusEffect: jest.fn()
+  useFocusEffect: jest.fn(),
+  useIsFocused: jest.fn(() => true)
 }));
 
 import { useNavigation } from '@react-navigation/native';
@@ -97,7 +98,8 @@ describe('PatientNewScreen', () => {
           fullName: 'Akin Kisi',
           age: 42,
           phoneNumber: '07000000001'
-        })
+        }),
+        'test-user-id'
       );
     });
 

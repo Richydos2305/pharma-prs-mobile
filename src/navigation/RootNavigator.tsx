@@ -3,10 +3,11 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { useAuth } from '../hooks/useAuth';
 import { AuthNavigator } from './AuthNavigator';
 import { AppNavigator } from './AppNavigator';
+import { OfflineWallScreen } from '../screens/OfflineWallScreen';
 import { colors } from '../theme/colors';
 
 export function RootNavigator() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, requiresOnline } = useAuth();
 
   if (isLoading) {
     return (
@@ -14,6 +15,10 @@ export function RootNavigator() {
         <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
+  }
+
+  if (isAuthenticated && requiresOnline) {
+    return <OfflineWallScreen />;
   }
 
   return isAuthenticated ? (

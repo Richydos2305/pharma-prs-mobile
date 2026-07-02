@@ -16,6 +16,12 @@ jest.mock('../../api/client', () => ({
   setLogoutCallback: jest.fn()
 }));
 
+jest.mock('../../services/userSession', () => ({
+  setCurrentUserId: jest.fn(),
+  setOfflineWallCallback: jest.fn(),
+  setSyncReadyCallback: jest.fn()
+}));
+
 import * as SecureStore from 'expo-secure-store';
 import { login as apiLogin, logout as apiLogout } from '../../api/auth';
 import { getMe } from '../../api/users';
@@ -52,7 +58,7 @@ describe('AuthContext', () => {
   });
 
   it('isAuthenticated becomes true after login resolves', async () => {
-    const mockUser = { _id: 'u1', email: 'a@b.com', fullName: 'Ada', role: 'Owner' };
+    const mockUser = { id: 'u1', email: 'a@b.com', fullName: 'Ada', role: 'Owner' };
     (apiLogin as jest.Mock).mockResolvedValueOnce({ accessToken: 'acc', refreshToken: 'ref' });
     (getMe as jest.Mock).mockResolvedValueOnce(mockUser);
 
@@ -68,7 +74,7 @@ describe('AuthContext', () => {
   });
 
   it('logout sets isAuthenticated to false and deletes both SecureStore keys', async () => {
-    const mockUser = { _id: 'u1', email: 'a@b.com', fullName: 'Ada', role: 'Owner' };
+    const mockUser = { id: 'u1', email: 'a@b.com', fullName: 'Ada', role: 'Owner' };
     (apiLogin as jest.Mock).mockResolvedValueOnce({ accessToken: 'acc', refreshToken: 'ref' });
     (getMe as jest.Mock).mockResolvedValueOnce(mockUser);
 
@@ -114,7 +120,7 @@ describe('AuthContext', () => {
   });
 
   it('restores user from tokens on bootstrap when tokens exist', async () => {
-    const mockUser = { _id: 'u1', email: 'a@b.com', fullName: 'Ada', role: 'Owner' };
+    const mockUser = { id: 'u1', email: 'a@b.com', fullName: 'Ada', role: 'Owner' };
     (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce('access-token').mockResolvedValueOnce('refresh-token');
     (getMe as jest.Mock).mockResolvedValueOnce(mockUser);
 
@@ -125,9 +131,10 @@ describe('AuthContext', () => {
     expect(result.current.user).toEqual(mockUser);
   });
 
-  it('clears tokens and stays unauthenticated if getMe fails during bootstrap', async () => {
+  it('clears tokens and stays unauthenticated when getMe returns 401 during bootstrap', async () => {
     (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce('access-token').mockResolvedValueOnce('refresh-token');
-    (getMe as jest.Mock).mockRejectedValueOnce(new Error('Unauthorized'));
+    const err = Object.assign(new Error('Unauthorized'), { response: { status: 401 } });
+    (getMe as jest.Mock).mockRejectedValueOnce(err);
 
     const { result } = renderHook(() => useAuthContext(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -135,6 +142,18 @@ describe('AuthContext', () => {
     expect(result.current.isAuthenticated).toBe(false);
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('accessToken');
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('refreshToken');
+  });
+
+  it('preserves tokens and stays unauthenticated (no cached profile) on network error during bootstrap', async () => {
+    (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce('access-token').mockResolvedValueOnce('refresh-token');
+    (getMe as jest.Mock).mockRejectedValueOnce(new Error('Network Error'));
+
+    const { result } = renderHook(() => useAuthContext(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(SecureStore.deleteItemAsync).not.toHaveBeenCalledWith('accessToken');
+    expect(SecureStore.deleteItemAsync).not.toHaveBeenCalledWith('refreshToken');
   });
 
   it('logout fires the API call with the stored refresh token', async () => {

@@ -3,7 +3,7 @@ import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextIn
 import { LinearGradient } from 'expo-linear-gradient';
 import type { TextInputProps } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -11,24 +11,30 @@ import { CalendarDays, Check, ChevronDown, ChevronLeft, Upload, X } from 'lucide
 import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { createPatient, updatePatient, uploadPatientDocument } from '../../api/patients';
 import { getApiErrorMessage } from '../../utils/apiError';
-import { listPharmacists } from '../../api/pharmacists';
 import { getSettings } from '../../api/settings';
 import { queryKeys } from '../../api/queryKeys';
-import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
+import { usePharmacists } from '../../hooks/usePharmacists';
+import Animated from 'react-native-reanimated';
 import { BottomSheetWrapper, Button, SuccessCheck } from '../../components/ui';
 import { useShakeAnimation } from '../../hooks/useShakeAnimation';
-import { KeyboardAvoidingWrapper, ScreenWrapper } from '../../components/layout';
+import { useStaggerFadeIn } from '../../hooks/useStaggerFadeIn';
+import { KeyboardAvoidingWrapper, OfflineIcon, ScreenWrapper } from '../../components/layout';
+import { useAuth } from '../../hooks/useAuth';
+import { useSync } from '../../contexts/SyncContext';
 import { colors } from '../../theme/colors';
 import { fonts } from '../../theme/typography';
 import { spacing } from '../../theme/spacing';
 import { buildDefaultTemplate } from '../../types/formBuilder';
 import type { FormSchema, FieldSchema, SectionSchema } from '../../types/formBuilder';
-import type { CreatePatientPayload, PatientCustomFieldsSection } from '../../types';
-import type { PatientsStackParamList } from '../../navigation/types';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as syncQueue from '../../services/syncQueue';
+import { generateLocalId } from '../../services/localId';
+import type { CreatePatientPayload, IPatient, PendingFileRef } from '../../types';
+import type { AppTabParamList } from '../../navigation/types';
 import { buildCustomFieldsSections, hasAttendedByValue } from '../../utils/patientFormSerialization';
 import type { MobileFileFieldState, MobilePendingFile } from '../../utils/patientFormSerialization';
 
-type Props = NativeStackScreenProps<PatientsStackParamList, 'PatientNew'>;
+type Props = BottomTabScreenProps<AppTabParamList, 'PlusTab'>;
 
 const PHARMACIST_SNAP = ['65%'];
 const DROPDOWN_SNAP = ['60%'];
@@ -71,6 +77,8 @@ function NewFieldBox({ label, value, onChangeText, multiline, keyboardType, erro
 
 export function PatientNewScreen({ navigation }: Props) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const { isOnline } = useSync();
 
   // Re-fetch settings every time this screen gains focus so the published
   // schema is always current (handles both fresh mounts and returning to screen).
@@ -78,6 +86,26 @@ export function PatientNewScreen({ navigation }: Props) {
     useCallback(() => {
       queryClient.invalidateQueries({ queryKey: queryKeys.settings });
     }, [queryClient])
+  );
+
+  // Reset all form state on every focus so the form always starts fresh.
+  useFocusEffect(
+    useCallback(() => {
+      setValues({});
+      setErrors({});
+      setStandardFileState({});
+      setRepeatableFileState({});
+      setRepeatableRows({});
+      setSaving(false);
+      setShowSuccess(false);
+      setDatePickerCtx(null);
+      setActiveDropdownField(null);
+      setActiveRelationFieldId(null);
+      setRepeatableDropdownCtx(null);
+      setRepeatableRelationCtx(null);
+      activeRelationFieldIdRef.current = null;
+      repeatableRelationCtxRef.current = null;
+    }, [])
   );
 
   const pharmacistSheetRef = useRef<BottomSheetModal>(null);
@@ -120,6 +148,7 @@ export function PatientNewScreen({ navigation }: Props) {
   const [showSuccess, setShowSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
   const { animatedStyle: shakeStyle, shake } = useShakeAnimation();
+  const anims = useStaggerFadeIn(6);
 
   // File state — tracked separately from text values so we can upload on save.
   const [standardFileState, setStandardFileState] = useState<Record<string, MobileFileFieldState>>({});
@@ -129,7 +158,7 @@ export function PatientNewScreen({ navigation }: Props) {
   const [repeatableRows, setRepeatableRows] = useState<Record<string, Array<Record<string, string>>>>({});
 
   const { data: settings } = useQuery({ queryKey: queryKeys.settings, queryFn: getSettings });
-  const { data: pharmacists } = useQuery({ queryKey: queryKeys.pharmacists, queryFn: listPharmacists });
+  const { data: pharmacists } = usePharmacists();
 
   const schema: FormSchema = settings?.formConfig?.schema ?? buildDefaultTemplate();
 
@@ -153,7 +182,7 @@ export function PatientNewScreen({ navigation }: Props) {
       if (fileFields.length > 0) {
         const newRowState: Record<string, MobileFileFieldState> = {};
         for (const field of fileFields) {
-          newRowState[field.id] = { existing: [], pending: null };
+          newRowState[field.id] = { existing: [], pending: [] };
         }
         setRepeatableFileState((prev) => ({
           ...prev,
@@ -200,19 +229,19 @@ export function PatientNewScreen({ navigation }: Props) {
 
   async function handlePickFile(fieldId: string) {
     try {
-      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        if (asset.size && asset.size > MAX_FILE_BYTES) {
-          Alert.alert('File too large', `"${asset.name}" is ${(asset.size / (1024 * 1024)).toFixed(1)} MB. Files must be under 10 MB.`);
-          return;
-        }
-        const pending: MobilePendingFile = { uri: asset.uri, mimeType: asset.mimeType ?? undefined, name: asset.name };
-        setStandardFileState((prev) => ({
-          ...prev,
-          [fieldId]: { existing: [], pending }
-        }));
+      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true, multiple: true });
+      if (result.canceled) return;
+      const rejected = result.assets.filter((a) => a.size && a.size > MAX_FILE_BYTES);
+      const valid = result.assets.filter((a) => !a.size || a.size <= MAX_FILE_BYTES);
+      if (rejected.length > 0) {
+        Alert.alert('Files too large', `The following file(s) exceed 10 MB and were skipped:\n${rejected.map((a) => `• ${a.name}`).join('\n')}`);
       }
+      if (valid.length === 0) return;
+      const newPending: MobilePendingFile[] = valid.map((a) => ({ uri: a.uri, mimeType: a.mimeType ?? undefined, name: a.name }));
+      setStandardFileState((prev) => ({
+        ...prev,
+        [fieldId]: { existing: [], pending: [...(prev[fieldId]?.pending ?? []), ...newPending] }
+      }));
     } catch {
       Alert.alert('File error', 'Could not open the file picker. Please try again.');
     }
@@ -220,26 +249,45 @@ export function PatientNewScreen({ navigation }: Props) {
 
   async function handlePickFileForRow(sectionId: string, rowIndex: number, fieldId: string) {
     try {
-      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        if (asset.size && asset.size > MAX_FILE_BYTES) {
-          Alert.alert('File too large', `"${asset.name}" is ${(asset.size / (1024 * 1024)).toFixed(1)} MB. Files must be under 10 MB.`);
-          return;
-        }
-        const pending: MobilePendingFile = { uri: asset.uri, mimeType: asset.mimeType ?? undefined, name: asset.name };
-        setRepeatableFileState((prev) => {
-          const rows = [...(prev[sectionId] ?? [])];
-          rows[rowIndex] = {
-            ...(rows[rowIndex] ?? {}),
-            [fieldId]: { existing: [], pending }
-          };
-          return { ...prev, [sectionId]: rows };
-        });
+      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true, multiple: true });
+      if (result.canceled) return;
+      const rejected = result.assets.filter((a) => a.size && a.size > MAX_FILE_BYTES);
+      const valid = result.assets.filter((a) => !a.size || a.size <= MAX_FILE_BYTES);
+      if (rejected.length > 0) {
+        Alert.alert('Files too large', `The following file(s) exceed 10 MB and were skipped:\n${rejected.map((a) => `• ${a.name}`).join('\n')}`);
       }
+      if (valid.length === 0) return;
+      const newPending: MobilePendingFile[] = valid.map((a) => ({ uri: a.uri, mimeType: a.mimeType ?? undefined, name: a.name }));
+      setRepeatableFileState((prev) => {
+        const rows = [...(prev[sectionId] ?? [])];
+        rows[rowIndex] = {
+          ...(rows[rowIndex] ?? {}),
+          [fieldId]: { existing: [], pending: [...(rows[rowIndex]?.[fieldId]?.pending ?? []), ...newPending] }
+        };
+        return { ...prev, [sectionId]: rows };
+      });
     } catch {
       Alert.alert('File error', 'Could not open the file picker. Please try again.');
     }
+  }
+
+  function handleRemovePendingFile(fieldId: string, index: number) {
+    setStandardFileState((prev) => ({
+      ...prev,
+      [fieldId]: { existing: [], pending: (prev[fieldId]?.pending ?? []).filter((_, i) => i !== index) }
+    }));
+  }
+
+  function handleRemovePendingFileForRow(sectionId: string, rowIndex: number, fieldId: string, index: number) {
+    setRepeatableFileState((prev) => {
+      const rows = [...(prev[sectionId] ?? [])];
+      const current = rows[rowIndex]?.[fieldId];
+      rows[rowIndex] = {
+        ...(rows[rowIndex] ?? {}),
+        [fieldId]: { existing: [], pending: (current?.pending ?? []).filter((_, i) => i !== index) }
+      };
+      return { ...prev, [sectionId]: rows };
+    });
   }
 
   // ── Validation ───────────────────────────────────────────────────────────────
@@ -258,9 +306,18 @@ export function PatientNewScreen({ navigation }: Props) {
     return Object.keys(newErrors).length === 0;
   }
 
-  // ── Upload helper: uploads pending files into sections ───────────────────────
+  // ── File helpers ─────────────────────────────────────────────────────────────
 
-  async function buildSectionsWithFiles(baseSections: PatientCustomFieldsSection[], patientId: string): Promise<PatientCustomFieldsSection[]> {
+  function hasAnyPendingFiles(): boolean {
+    if (Object.values(standardFileState).some((s) => s.pending.length > 0)) return true;
+    return Object.values(repeatableFileState).some((rows) => rows.some((row) => Object.values(row).some((s) => s.pending.length > 0)));
+  }
+
+  // Online: upload pending files and overlay returned URLs into base sections.
+  async function buildSectionsWithFileUploads(
+    patientId: string,
+    baseSections: ReturnType<typeof buildCustomFieldsSections>
+  ): Promise<ReturnType<typeof buildCustomFieldsSections>> {
     return Promise.all(
       baseSections.map(async (section) => {
         const schemaSection = schema.sections.find((s) => s.id === section.name);
@@ -271,10 +328,9 @@ export function PatientNewScreen({ navigation }: Props) {
         if (schemaSection.type === 'standard') {
           const fieldsRow: Record<string, unknown> = { ...(section.fields[0] ?? {}) };
           for (const field of fileFields) {
-            const fState = standardFileState[field.id];
-            if (fState?.pending) {
-              fieldsRow[field.id] = [await uploadPatientDocument(patientId, fState.pending)];
-            }
+            const fState = standardFileState[field.id] ?? { existing: [], pending: [] };
+            const uploaded = await Promise.all(fState.pending.map((f) => uploadPatientDocument(patientId, f)));
+            fieldsRow[field.id] = [...fState.existing, ...uploaded];
           }
           return { name: section.name, fields: [fieldsRow] };
         }
@@ -285,10 +341,9 @@ export function PatientNewScreen({ navigation }: Props) {
             const rowFState = rowFileStates[idx] ?? {};
             const merged: Record<string, unknown> = { ...rowData };
             for (const field of fileFields) {
-              const fstate = rowFState[field.id];
-              if (fstate?.pending) {
-                merged[field.id] = [await uploadPatientDocument(patientId, fstate.pending)];
-              }
+              const fstate = rowFState[field.id] ?? { existing: [], pending: [] };
+              const uploaded = await Promise.all(fstate.pending.map((f) => uploadPatientDocument(patientId, f)));
+              merged[field.id] = [...fstate.existing, ...uploaded];
             }
             return merged;
           })
@@ -298,18 +353,62 @@ export function PatientNewScreen({ navigation }: Props) {
     );
   }
 
-  function hasPendingFiles(): boolean {
-    for (const fState of Object.values(standardFileState)) {
-      if (fState.pending) return true;
-    }
-    for (const sectionRows of Object.values(repeatableFileState)) {
-      for (const row of sectionRows) {
-        for (const fState of Object.values(row)) {
-          if (fState.pending) return true;
+  // Offline: copy pending files locally and overlay PendingFileRef placeholders.
+  async function buildSectionsWithPlaceholders(baseSections: ReturnType<typeof buildCustomFieldsSections>): Promise<{
+    sections: ReturnType<typeof buildCustomFieldsSections>;
+    fileQueue: Array<{ localPath: string; fileName: string; mimeType: string }>;
+  }> {
+    const fileQueue: Array<{ localPath: string; fileName: string; mimeType: string }> = [];
+    const dir = `${FileSystem.documentDirectory ?? ''}pending-uploads/`;
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+
+    const sections = await Promise.all(
+      baseSections.map(async (section) => {
+        const schemaSection = schema.sections.find((s) => s.id === section.name);
+        if (!schemaSection) return section;
+        const fileFields = schemaSection.fields.filter((f) => f.type === 'file');
+        if (fileFields.length === 0) return section;
+
+        if (schemaSection.type === 'standard') {
+          const fieldsRow: Record<string, unknown> = { ...(section.fields[0] ?? {}) };
+          for (const field of fileFields) {
+            const fState = standardFileState[field.id] ?? { existing: [], pending: [] };
+            const pendingRefs: PendingFileRef[] = [];
+            for (const f of fState.pending) {
+              const localPath = `${dir}${generateLocalId()}_${f.name}`;
+              await FileSystem.copyAsync({ from: f.uri, to: localPath });
+              pendingRefs.push({ name: f.name, localPath, pending: true });
+              fileQueue.push({ localPath, fileName: f.name, mimeType: f.mimeType ?? 'application/octet-stream' });
+            }
+            fieldsRow[field.id] = [...fState.existing, ...pendingRefs];
+          }
+          return { name: section.name, fields: [fieldsRow] };
         }
-      }
-    }
-    return false;
+
+        const rowFileStates = repeatableFileState[section.name] ?? [];
+        const fields = await Promise.all(
+          section.fields.map(async (rowData, idx) => {
+            const rowFState = rowFileStates[idx] ?? {};
+            const merged: Record<string, unknown> = { ...rowData };
+            for (const field of fileFields) {
+              const fstate = rowFState[field.id] ?? { existing: [], pending: [] };
+              const pendingRefs: PendingFileRef[] = [];
+              for (const f of fstate.pending) {
+                const localPath = `${dir}${generateLocalId()}_${f.name}`;
+                await FileSystem.copyAsync({ from: f.uri, to: localPath });
+                pendingRefs.push({ name: f.name, localPath, pending: true });
+                fileQueue.push({ localPath, fileName: f.name, mimeType: f.mimeType ?? 'application/octet-stream' });
+              }
+              merged[field.id] = [...fstate.existing, ...pendingRefs];
+            }
+            return merged;
+          })
+        );
+        return { name: section.name, fields };
+      })
+    );
+
+    return { sections, fileQueue };
   }
 
   // ── Submit ───────────────────────────────────────────────────────────────────
@@ -328,26 +427,37 @@ export function PatientNewScreen({ navigation }: Props) {
     setSaving(true);
     try {
       const baseSections = buildCustomFieldsSections(schema, values, repeatableRows);
-
-      const payload: CreatePatientPayload = {
+      const basePayload: CreatePatientPayload = {
         fullName: values['core-full-name'] ?? '',
         age: parseInt(values['core-age'] ?? '0', 10),
         phoneNumber: values['core-phone-number'] ?? '',
         customFields: { sections: baseSections }
       };
+      const hasPending = hasAnyPendingFiles();
 
-      const patient = await createPatient(payload);
+      let patient: IPatient;
 
-      if (hasPendingFiles()) {
-        const sections = await buildSectionsWithFiles(baseSections, patient.id);
-        await updatePatient(patient.id, { customFields: { sections } });
+      if (isOnline) {
+        patient = await createPatient(basePayload, user?.id ?? '');
+        if (hasPending) {
+          const sectionsWithFiles = await buildSectionsWithFileUploads(patient.id, baseSections);
+          await updatePatient(patient.id, { customFields: { sections: sectionsWithFiles } });
+        }
+      } else if (hasPending) {
+        const { sections, fileQueue } = await buildSectionsWithPlaceholders(baseSections);
+        patient = await createPatient({ ...basePayload, customFields: { sections } }, user?.id ?? '');
+        for (const qEntry of fileQueue) {
+          await syncQueue.enqueue({ operationType: 'UPLOAD_FILE', entityId: patient.id, payload: { ...qEntry, localPatientId: patient.id } });
+        }
+      } else {
+        patient = await createPatient(basePayload, user?.id ?? '');
       }
 
       queryClient.invalidateQueries({ queryKey: queryKeys.patients.all });
       setShowSuccess(true);
       setTimeout(() => {
         setShowSuccess(false);
-        navigation.replace('PatientDetail', { patientId: patient.id });
+        navigation.navigate('Patients', { screen: 'PatientDetail', params: { patientId: patient.id } });
       }, 700);
     } catch (err) {
       setSaving(false);
@@ -439,22 +549,33 @@ export function PatientNewScreen({ navigation }: Props) {
       );
     }
 
-    // File — document / image picker (all file types)
+    // File — document / image picker (multi-file)
     if (field.type === 'file') {
-      const displayName = standardFileState[field.id]?.pending?.name ?? null;
+      const pendingFiles = standardFileState[field.id]?.pending ?? [];
+      const hasAny = pendingFiles.length > 0;
       return (
-        <Pressable key={field.id} style={styles.fileField} onPress={() => handlePickFile(field.id)}>
-          <View style={styles.fileFieldLeft}>
-            <Text style={styles.fieldBoxLabel}>
-              {field.label}
-              {field.required ? ' *' : ''}
-            </Text>
-            <Text style={[styles.fieldBoxInput, !displayName && styles.fieldBoxInputPlaceholder]} numberOfLines={1}>
-              {displayName ?? 'Tap to upload file'}
-            </Text>
-          </View>
-          <Upload size={16} color={displayName ? colors.accent : colors.textMuted} />
-        </Pressable>
+        <View key={field.id} style={{ gap: 6 }}>
+          <Text style={styles.fieldBoxLabel}>
+            {field.label}
+            {field.required ? ' *' : ''}
+          </Text>
+          {pendingFiles.map((f, i) => (
+            <View key={`pend-${i}`} style={styles.fileChipRow}>
+              <Text style={styles.fileChipName} numberOfLines={1}>
+                {f.name}
+              </Text>
+              <Pressable onPress={() => handleRemovePendingFile(field.id, i)} hitSlop={8}>
+                <X size={14} color={colors.accent} />
+              </Pressable>
+            </View>
+          ))}
+          <Pressable style={styles.fileField} onPress={() => handlePickFile(field.id)}>
+            <View style={styles.fileFieldLeft}>
+              <Text style={[styles.fieldBoxInput, !hasAny && styles.fieldBoxInputPlaceholder]}>{hasAny ? 'Add more files' : 'Add files'}</Text>
+            </View>
+            <Upload size={16} color={hasAny ? colors.accent : colors.textMuted} />
+          </Pressable>
+        </View>
       );
     }
 
@@ -552,19 +673,30 @@ export function PatientNewScreen({ navigation }: Props) {
       );
     }
 
-    // File — document / image picker with repeatable context
+    // File — document / image picker with repeatable context (multi-file)
     if (field.type === 'file') {
-      const displayName = (repeatableFileState[sectionId] ?? [])[rowIndex]?.[field.id]?.pending?.name ?? null;
+      const pendingFiles = (repeatableFileState[sectionId] ?? [])[rowIndex]?.[field.id]?.pending ?? [];
+      const hasAny = pendingFiles.length > 0;
       return (
-        <Pressable key={field.id} style={styles.fileField} onPress={() => handlePickFileForRow(sectionId, rowIndex, field.id)}>
-          <View style={styles.fileFieldLeft}>
-            <Text style={styles.fieldBoxLabel}>{field.label}</Text>
-            <Text style={[styles.fieldBoxInput, !displayName && styles.fieldBoxInputPlaceholder]} numberOfLines={1}>
-              {displayName ?? 'Tap to upload file'}
-            </Text>
-          </View>
-          <Upload size={16} color={displayName ? colors.accent : colors.textMuted} />
-        </Pressable>
+        <View key={field.id} style={{ gap: 6 }}>
+          <Text style={styles.fieldBoxLabel}>{field.label}</Text>
+          {pendingFiles.map((f, i) => (
+            <View key={`pend-${i}`} style={styles.fileChipRow}>
+              <Text style={styles.fileChipName} numberOfLines={1}>
+                {f.name}
+              </Text>
+              <Pressable onPress={() => handleRemovePendingFileForRow(sectionId, rowIndex, field.id, i)} hitSlop={8}>
+                <X size={14} color={colors.accent} />
+              </Pressable>
+            </View>
+          ))}
+          <Pressable style={styles.fileField} onPress={() => handlePickFileForRow(sectionId, rowIndex, field.id)}>
+            <View style={styles.fileFieldLeft}>
+              <Text style={[styles.fieldBoxInput, !hasAny && styles.fieldBoxInputPlaceholder]}>{hasAny ? 'Add more files' : 'Add files'}</Text>
+            </View>
+            <Upload size={16} color={hasAny ? colors.accent : colors.textMuted} />
+          </Pressable>
+        </View>
       );
     }
 
@@ -639,12 +771,14 @@ export function PatientNewScreen({ navigation }: Props) {
     <ScreenWrapper hasTabBar>
       <KeyboardAvoidingWrapper>
         {/* Nav bar */}
-        <Animated.View style={styles.navBar} entering={FadeInDown.duration(420).reduceMotion(ReduceMotion.System)}>
+        <Animated.View style={[styles.navBar, anims[0]]}>
           <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
             <ChevronLeft size={16} color={colors.accent} />
           </Pressable>
           <Text style={styles.navTitle}>New Patient</Text>
-          <View style={styles.navSpacer} />
+          <View style={styles.navSpacer}>
+            <OfflineIcon />
+          </View>
         </Animated.View>
 
         <View style={{ flex: 1 }}>
@@ -653,20 +787,19 @@ export function PatientNewScreen({ navigation }: Props) {
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
           >
             {schema.sections.map((section, index) => {
-              const entering = FadeInDown.duration(420)
-                .delay((index + 1) * 130)
-                .reduceMotion(ReduceMotion.System);
+              const animStyle = anims[Math.min(index + 1, 4)];
               if (section.type === 'repeatable') {
                 return (
-                  <Animated.View key={section.id} entering={entering}>
+                  <Animated.View key={section.id} style={animStyle}>
                     {renderRepeatableSection(section)}
                   </Animated.View>
                 );
               }
               return (
-                <Animated.View key={section.id} entering={entering}>
+                <Animated.View key={section.id} style={animStyle}>
                   <View style={styles.section}>
                     <Text style={styles.sectionTitle}>{section.name}</Text>
                     {section.fields.map((field) => renderField(field))}
@@ -676,12 +809,7 @@ export function PatientNewScreen({ navigation }: Props) {
             })}
 
             {/* Actions */}
-            <Animated.View
-              style={styles.actions}
-              entering={FadeInDown.duration(420)
-                .delay((schema.sections.length + 1) * 130)
-                .reduceMotion(ReduceMotion.System)}
-            >
+            <Animated.View style={[styles.actions, anims[5]]}>
               <Text style={styles.actionsLabel}>Actions</Text>
               <Animated.View style={shakeStyle}>
                 <Button title="Save Patient" onPress={handleSubmit} loading={saving} disabled={saving} />
@@ -957,6 +1085,21 @@ const styles = StyleSheet.create({
   fileFieldLeft: {
     flex: 1,
     gap: 4
+  },
+  fileChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.accentBg,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 6
+  },
+  fileChipName: {
+    flex: 1,
+    fontFamily: fonts.bodySemiBold,
+    fontSize: 13,
+    color: colors.accent
   },
 
   errorText: {

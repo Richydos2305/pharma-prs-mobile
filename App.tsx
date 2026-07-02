@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useFonts } from 'expo-font';
 import FunnelSansBold from './assets/fonts/FunnelSans-Bold.ttf';
 import { Geist_400Regular } from '@expo-google-fonts/geist/400Regular';
@@ -10,8 +11,10 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { NavigationContainer } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './src/contexts/AuthContext';
+import { SyncProvider } from './src/contexts/SyncContext';
 import { ToastProvider } from './src/contexts/ToastContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import * as db from './src/services/db';
 import { colors } from './src/theme/colors';
 
 const queryClient = new QueryClient({
@@ -26,8 +29,13 @@ export default function App() {
     Newsreader_500Medium,
     Newsreader_400Regular_Italic
   });
+  const [dbReady, setDbReady] = useState(false);
 
-  if (!fontsLoaded) {
+  useEffect(() => {
+    db.init().then(() => setDbReady(true));
+  }, []);
+
+  if (!fontsLoaded || !dbReady) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
         <ActivityIndicator color={colors.accent} />
@@ -40,11 +48,13 @@ export default function App() {
       <ToastProvider>
         <BottomSheetModalProvider>
           <QueryClientProvider client={queryClient}>
-            <AuthProvider>
-              <NavigationContainer>
-                <RootNavigator />
-              </NavigationContainer>
-            </AuthProvider>
+            <SyncProvider>
+              <AuthProvider>
+                <NavigationContainer>
+                  <RootNavigator />
+                </NavigationContainer>
+              </AuthProvider>
+            </SyncProvider>
           </QueryClientProvider>
         </BottomSheetModalProvider>
         <StatusBar style="dark" />
