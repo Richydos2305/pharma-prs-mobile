@@ -5,7 +5,7 @@ import { Geist_400Regular } from '@expo-google-fonts/geist/400Regular';
 import { Geist_600SemiBold } from '@expo-google-fonts/geist/600SemiBold';
 import { Newsreader_400Regular_Italic, Newsreader_500Medium } from '@expo-google-fonts/newsreader';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { NavigationContainer } from '@react-navigation/native';
@@ -30,10 +30,24 @@ export default function App() {
     Newsreader_400Regular_Italic
   });
   const [dbReady, setDbReady] = useState(false);
+  const [dbError, setDbError] = useState<Error | null>(null);
 
   useEffect(() => {
-    db.init().then(() => setDbReady(true));
+    db.init()
+      .then(() => setDbReady(true))
+      .catch((err) => {
+        console.error('[App] DB init failed:', err);
+        setDbError(err instanceof Error ? err : new Error(String(err)));
+      });
   }, []);
+
+  if (dbError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: 24 }}>
+        <Text style={{ textAlign: 'center' }}>Something went wrong starting the app. Please reinstall or contact support.</Text>
+      </View>
+    );
+  }
 
   if (!fontsLoaded || !dbReady) {
     return (
