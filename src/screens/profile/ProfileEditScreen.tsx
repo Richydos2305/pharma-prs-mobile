@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, Lock } from 'lucide-react-native';
@@ -8,7 +9,7 @@ import { getMe, updateMe } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
 import { Button, Input, SuccessCheck } from '../../components/ui';
 import { useShakeAnimation } from '../../hooks/useShakeAnimation';
-import { KeyboardAvoidingWrapper, ScreenWrapper } from '../../components/layout';
+import { ScreenWrapper } from '../../components/layout';
 import { colors } from '../../theme/colors';
 import { fonts, typography } from '../../theme/typography';
 import { spacing } from '../../theme/spacing';
@@ -59,7 +60,7 @@ function EditForm({ user, navigation }: EditFormProps) {
   }
 
   return (
-    <KeyboardAvoidingWrapper>
+    <View style={styles.flex}>
       <View style={styles.navBar}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
           <ChevronLeft size={16} color={colors.accent} />
@@ -70,11 +71,12 @@ function EditForm({ user, navigation }: EditFormProps) {
         </Pressable>
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        bottomOffset={20}
       >
         <View style={styles.form}>
           <Input
@@ -98,10 +100,10 @@ function EditForm({ user, navigation }: EditFormProps) {
         <Animated.View style={shakeStyle}>
           <Button title="Save Changes" onPress={handleSave} loading={isPending} disabled={isPending} />
         </Animated.View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <SuccessCheck visible={showSuccess} />
-    </KeyboardAvoidingWrapper>
+    </View>
   );
 }
 
@@ -115,6 +117,7 @@ export function ProfileEditScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   loadingPlaceholder: { flex: 1 },
+  flex: { flex: 1 },
   navBar: {
     flexDirection: 'row',
     alignItems: 'center',

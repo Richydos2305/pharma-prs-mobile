@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
-import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { TextInputProps } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
@@ -18,7 +19,7 @@ import Animated from 'react-native-reanimated';
 import { BottomSheetWrapper, Button, SuccessCheck } from '../../components/ui';
 import { useShakeAnimation } from '../../hooks/useShakeAnimation';
 import { useStaggerFadeIn } from '../../hooks/useStaggerFadeIn';
-import { KeyboardAvoidingWrapper, OfflineIcon, ScreenWrapper } from '../../components/layout';
+import { OfflineIcon, ScreenWrapper } from '../../components/layout';
 import { useAuth } from '../../hooks/useAuth';
 import { useSync } from '../../contexts/SyncContext';
 import { colors } from '../../theme/colors';
@@ -31,7 +32,7 @@ import * as syncQueue from '../../services/syncQueue';
 import { generateLocalId } from '../../services/localId';
 import type { CreatePatientPayload, IPatient, PendingFileRef } from '../../types';
 import type { AppTabParamList } from '../../navigation/types';
-import { buildCustomFieldsSections, hasAttendedByValue } from '../../utils/patientFormSerialization';
+import { buildCustomFieldsSections, hasAttendedByValue, stripBlankRepeatableRows } from '../../utils/patientFormSerialization';
 import { formatDateForDisplay } from '../../utils/getLastAppointmentDate';
 import type { MobileFileFieldState, MobilePendingFile } from '../../utils/patientFormSerialization';
 
@@ -317,7 +318,8 @@ export function PatientNewScreen({ navigation }: Props) {
   // Online: upload pending files and overlay returned URLs into base sections.
   async function buildSectionsWithFileUploads(
     patientId: string,
-    baseSections: ReturnType<typeof buildCustomFieldsSections>
+    baseSections: ReturnType<typeof buildCustomFieldsSections>,
+    repeatableFileStateArg: Record<string, Array<Record<string, MobileFileFieldState>>>
   ): Promise<ReturnType<typeof buildCustomFieldsSections>> {
     return Promise.all(
       baseSections.map(async (section) => {
@@ -336,7 +338,7 @@ export function PatientNewScreen({ navigation }: Props) {
           return { name: section.name, fields: [fieldsRow] };
         }
 
-        const rowFileStates = repeatableFileState[section.name] ?? [];
+        const rowFileStates = repeatableFileStateArg[section.name] ?? [];
         const fields = await Promise.all(
           section.fields.map(async (rowData, idx) => {
             const rowFState = rowFileStates[idx] ?? {};
@@ -355,7 +357,10 @@ export function PatientNewScreen({ navigation }: Props) {
   }
 
   // Offline: copy pending files locally and overlay PendingFileRef placeholders.
-  async function buildSectionsWithPlaceholders(baseSections: ReturnType<typeof buildCustomFieldsSections>): Promise<{
+  async function buildSectionsWithPlaceholders(
+    baseSections: ReturnType<typeof buildCustomFieldsSections>,
+    repeatableFileStateArg: Record<string, Array<Record<string, MobileFileFieldState>>>
+  ): Promise<{
     sections: ReturnType<typeof buildCustomFieldsSections>;
     fileQueue: Array<{ localPath: string; fileName: string; mimeType: string }>;
   }> {
@@ -386,7 +391,7 @@ export function PatientNewScreen({ navigation }: Props) {
           return { name: section.name, fields: [fieldsRow] };
         }
 
-        const rowFileStates = repeatableFileState[section.name] ?? [];
+        const rowFileStates = repeatableFileStateArg[section.name] ?? [];
         const fields = await Promise.all(
           section.fields.map(async (rowData, idx) => {
             const rowFState = rowFileStates[idx] ?? {};
@@ -427,7 +432,8 @@ export function PatientNewScreen({ navigation }: Props) {
 
     setSaving(true);
     try {
-      const baseSections = buildCustomFieldsSections(schema, values, repeatableRows);
+      const { rows: filteredRows, fileState: filteredFileState } = stripBlankRepeatableRows(schema, repeatableRows, repeatableFileState);
+      const baseSections = buildCustomFieldsSections(schema, values, filteredRows);
       const basePayload: CreatePatientPayload = {
         fullName: values['core-full-name'] ?? '',
         age: parseInt(values['core-age'] ?? '0', 10),
@@ -441,11 +447,11 @@ export function PatientNewScreen({ navigation }: Props) {
       if (isOnline) {
         patient = await createPatient(basePayload, user?.id ?? '');
         if (hasPending) {
-          const sectionsWithFiles = await buildSectionsWithFileUploads(patient.id, baseSections);
+          const sectionsWithFiles = await buildSectionsWithFileUploads(patient.id, baseSections, filteredFileState);
           await updatePatient(patient.id, { customFields: { sections: sectionsWithFiles } });
         }
       } else if (hasPending) {
-        const { sections, fileQueue } = await buildSectionsWithPlaceholders(baseSections);
+        const { sections, fileQueue } = await buildSectionsWithPlaceholders(baseSections, filteredFileState);
         patient = await createPatient({ ...basePayload, customFields: { sections } }, user?.id ?? '');
         for (const qEntry of fileQueue) {
           await syncQueue.enqueue({ operationType: 'UPLOAD_FILE', entityId: patient.id, payload: { ...qEntry, localPatientId: patient.id } });
@@ -725,38 +731,40 @@ export function PatientNewScreen({ navigation }: Props) {
     const rows = repeatableRows[section.id] ?? [];
     const rowLabel = section.rowLabel ?? 'Item';
     const addLabel = section.addButtonLabel ?? 'Add another';
+    // No rows yet — show one editable row inline instead of an empty-state
+    // message. Nothing is written to state until the user actually types, so
+    // an untouched row never gets saved (see stripBlankRepeatableRows).
+    const isPlaceholder = rows.length === 0;
+    const displayRows = isPlaceholder ? [{}] : rows;
 
     return (
       <View key={section.id} style={styles.section}>
         <View style={styles.prescriptionsHeader}>
-          <Text style={styles.sectionTitle}>{section.name}</Text>
+          <Text style={styles.repeatableSectionTitle} numberOfLines={1}>
+            {section.name}
+          </Text>
           <Pressable onPress={() => addRow(section.id)}>
             <Text style={styles.addRxText}>+ {addLabel}</Text>
           </Pressable>
         </View>
 
-        {rows.length === 0 ? (
-          <View style={styles.prescriptionsEmpty}>
-            <Text style={styles.prescriptionsEmptyTitle}>No {rowLabel.toLowerCase()}s added yet</Text>
-            <Text style={styles.prescriptionsEmptyBody}>Tap &quot;+ {addLabel}&quot; to add the first one.</Text>
-          </View>
-        ) : (
-          rows.map((rowValues, rowIndex) => (
-            <View key={rowIndex} style={styles.rxRow}>
-              <View style={styles.rxCard}>
-                <Text style={styles.rxRowLabel}>
-                  {rowLabel} {rowIndex + 1}
-                </Text>
-                {section.fields.map((field) =>
-                  renderRepeatableField(field, rowValues, (fieldId, val) => setRowValue(section.id, rowIndex, fieldId, val), section.id, rowIndex)
-                )}
-              </View>
-              <Pressable onPress={() => removeRow(section.id, rowIndex)} style={styles.rxRemove}>
-                <X size={16} color={colors.textMuted} />
-              </Pressable>
+        {displayRows.map((rowValues, rowIndex) => (
+          <View key={rowIndex} style={styles.rxCard}>
+            <View style={styles.rxCardHeader}>
+              <Text style={styles.rxRowLabel}>
+                {rowLabel} {rowIndex + 1}
+              </Text>
+              {!isPlaceholder && (
+                <Pressable onPress={() => removeRow(section.id, rowIndex)} hitSlop={8}>
+                  <X size={16} color={colors.textMuted} />
+                </Pressable>
+              )}
             </View>
-          ))
-        )}
+            {section.fields.map((field) =>
+              renderRepeatableField(field, rowValues, (fieldId, val) => setRowValue(section.id, rowIndex, fieldId, val), section.id, rowIndex)
+            )}
+          </View>
+        ))}
       </View>
     );
   }
@@ -774,7 +782,7 @@ export function PatientNewScreen({ navigation }: Props) {
 
   return (
     <ScreenWrapper hasTabBar>
-      <KeyboardAvoidingWrapper>
+      <View style={styles.flex}>
         {/* Nav bar */}
         <Animated.View style={[styles.navBar, anims[0]]}>
           <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -787,12 +795,13 @@ export function PatientNewScreen({ navigation }: Props) {
         </Animated.View>
 
         <View style={{ flex: 1 }}>
-          <ScrollView
+          <KeyboardAwareScrollView
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
+            bottomOffset={20}
           >
             {schema.sections.map((section, index) => {
               const animStyle = anims[Math.min(index + 1, 4)];
@@ -823,10 +832,10 @@ export function PatientNewScreen({ navigation }: Props) {
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </Pressable>
             </Animated.View>
-          </ScrollView>
+          </KeyboardAwareScrollView>
           <LinearGradient colors={['rgba(245,242,233,0)', '#F5F2E9']} style={styles.scrollFade} pointerEvents="none" />
         </View>
-      </KeyboardAvoidingWrapper>
+      </View>
 
       {/* ── Date picker ──────────────────────────────────────────────────────── */}
       {/* Android: render DateTimePicker conditionally — the OS shows it as a  */}
@@ -945,6 +954,8 @@ export function PatientNewScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+
   // Nav bar
   navBar: {
     flexDirection: 'row',
@@ -1002,33 +1013,23 @@ const styles = StyleSheet.create({
   prescriptionsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    gap: spacing.sm
+  },
+  // Smaller + shrinkable than sectionTitle since this one always shares its
+  // row with the add-button label — long admin-defined section names
+  // truncate instead of colliding with the button.
+  repeatableSectionTitle: {
+    flexShrink: 1,
+    fontFamily: 'FunnelSans-Bold',
+    fontWeight: '700',
+    fontSize: 16,
+    color: colors.text
   },
   addRxText: {
     fontFamily: fonts.bodySemiBold,
     fontSize: 12,
     color: colors.accent
-  },
-
-  // Empty state
-  prescriptionsEmpty: {
-    backgroundColor: colors.inputFill,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#DDD6C7',
-    padding: 14,
-    gap: 8
-  },
-  prescriptionsEmptyTitle: {
-    fontFamily: fonts.bodySemiBold,
-    fontSize: 14,
-    color: colors.text
-  },
-  prescriptionsEmptyBody: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    lineHeight: 18,
-    color: '#5F5A53'
   },
 
   // Field box (label inside)
@@ -1114,13 +1115,7 @@ const styles = StyleSheet.create({
   },
 
   // Repeatable row
-  rxRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm
-  },
   rxCard: {
-    flex: 1,
     backgroundColor: colors.inputFill,
     borderRadius: 16,
     borderWidth: 1,
@@ -1129,14 +1124,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     gap: 10
   },
+  rxCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
   rxRowLabel: {
     fontFamily: fonts.bodySemiBold,
     fontSize: 12,
     color: colors.textMuted
-  },
-  rxRemove: {
-    paddingTop: 14,
-    padding: spacing.xs
   },
 
   // Actions

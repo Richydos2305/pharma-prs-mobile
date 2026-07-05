@@ -100,3 +100,5 @@ jest.mock('expo-file-system/legacy', () => ({
   copyAsync: jest.fn().mockResolvedValue(undefined),
   deleteAsync: jest.fn().mockResolvedValue(undefined)
 }));
+
+jest.mock('react-native-keyboard-controller', () => jest.requireActual('react-native-keyboard-controller/jest'));

@@ -5,7 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 import * as syncEngine from '../services/syncEngine';
 import * as syncQueue from '../services/syncQueue';
 import { isOnlineNow, useNetworkStatus } from './useNetworkStatus';
-import { triggerOfflineWall, triggerSyncReady, OFFLINE_THRESHOLD_MS } from '../services/userSession';
+import { getCurrentUserId, triggerOfflineWall, triggerSyncReady, OFFLINE_THRESHOLD_MS } from '../services/userSession';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -29,6 +29,7 @@ export function useSyncEngine(): {
   const offlineWallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runSync = useCallback(async () => {
+    if (!getCurrentUserId()) return;
     setIsSyncing(true);
     try {
       await syncEngine.run(queryClient);

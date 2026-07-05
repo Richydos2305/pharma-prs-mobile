@@ -146,3 +146,45 @@ export function hasAttendedByValue(
   }
   return false;
 }
+
+// Drops repeatable rows the user never actually filled in (every non-file
+// field blank and no attached files) so an untouched default row doesn't get
+// persisted as a phantom record. Filters repeatableRows and repeatableFileState
+// in lockstep so row indices stay aligned for file-upload lookups.
+export function stripBlankRepeatableRows(
+  schema: FormSchema,
+  repeatableRows: Record<string, Array<Record<string, string>>>,
+  repeatableFileState: Record<string, Array<Record<string, MobileFileFieldState>>>
+): {
+  rows: Record<string, Array<Record<string, string>>>;
+  fileState: Record<string, Array<Record<string, MobileFileFieldState>>>;
+} {
+  const rows: Record<string, Array<Record<string, string>>> = {};
+  const fileState: Record<string, Array<Record<string, MobileFileFieldState>>> = {};
+
+  for (const section of schema.sections) {
+    if (section.type !== 'repeatable') continue;
+
+    const textFields = section.fields.filter((f) => f.type !== 'file');
+    const fileFields = section.fields.filter((f) => f.type === 'file');
+    const sectionRows = repeatableRows[section.id] ?? [];
+    const sectionFileRows = repeatableFileState[section.id] ?? [];
+
+    const keptRows: Array<Record<string, string>> = [];
+    const keptFileRows: Array<Record<string, MobileFileFieldState>> = [];
+
+    sectionRows.forEach((row, i) => {
+      const fileRow = sectionFileRows[i] ?? {};
+      const hasText = textFields.some((f) => row[f.id]?.trim());
+      const hasFile = fileFields.some((f) => (fileRow[f.id]?.existing.length ?? 0) > 0 || (fileRow[f.id]?.pending.length ?? 0) > 0);
+      if (!hasText && !hasFile) return;
+      keptRows.push(row);
+      keptFileRows.push(fileRow);
+    });
+
+    rows[section.id] = keptRows;
+    fileState[section.id] = keptFileRows;
+  }
+
+  return { rows, fileState };
+}
