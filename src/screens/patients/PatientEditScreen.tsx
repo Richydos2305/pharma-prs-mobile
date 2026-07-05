@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
-import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { TextInputProps } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -18,7 +19,7 @@ import { usePharmacists } from '../../hooks/usePharmacists';
 import Animated from 'react-native-reanimated';
 import { BottomSheetWrapper, Button, SuccessCheck } from '../../components/ui';
 import { useShakeAnimation } from '../../hooks/useShakeAnimation';
-import { KeyboardAvoidingWrapper, ScreenWrapper } from '../../components/layout';
+import { ScreenWrapper } from '../../components/layout';
 import { DeletePatientSheet } from '../../components/patients/DeletePatientSheet';
 import { useSync } from '../../contexts/SyncContext';
 import { colors } from '../../theme/colors';
@@ -34,7 +35,8 @@ import {
   hydrateRepeatableFileState,
   hydrateRepeatableSectionRows,
   hydrateStandardFileState,
-  hydrateStandardSectionValues
+  hydrateStandardSectionValues,
+  stripBlankRepeatableRows
 } from '../../utils/patientFormSerialization';
 import type { MobileFileFieldState, MobilePendingFile } from '../../utils/patientFormSerialization';
 import { formatDateForDisplay } from '../../utils/getLastAppointmentDate';
@@ -398,7 +400,10 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
 
   // ── Upload helper: merges existing + newly-uploaded (or queued) files ────────
 
-  async function buildSectionsWithFiles(baseSections: PatientCustomFieldsSection[]): Promise<PatientCustomFieldsSection[]> {
+  async function buildSectionsWithFiles(
+    baseSections: PatientCustomFieldsSection[],
+    repeatableFileStateArg: Record<string, Array<Record<string, MobileFileFieldState>>>
+  ): Promise<PatientCustomFieldsSection[]> {
     if (isOnline) {
       // Online: upload pending files immediately and embed Cloudinary URLs.
       return Promise.all(
@@ -418,7 +423,7 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
             return { name: section.name, fields: [fieldsRow] };
           }
 
-          const rowFileStates = repeatableFileState[section.name] ?? [];
+          const rowFileStates = repeatableFileStateArg[section.name] ?? [];
           const fields = await Promise.all(
             section.fields.map(async (rowData, idx) => {
               const rowFState = rowFileStates[idx] ?? {};
@@ -467,7 +472,7 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
           return { name: section.name, fields: [fieldsRow] };
         }
 
-        const rowFileStates = repeatableFileState[section.name] ?? [];
+        const rowFileStates = repeatableFileStateArg[section.name] ?? [];
         const fields = await Promise.all(
           section.fields.map(async (rowData, idx) => {
             const rowFState = rowFileStates[idx] ?? {};
@@ -510,8 +515,9 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
 
     setSaving(true);
     try {
-      const baseSections = buildCustomFieldsSections(schema, values, repeatableRows);
-      const sections = await buildSectionsWithFiles(baseSections);
+      const { rows: filteredRows, fileState: filteredFileState } = stripBlankRepeatableRows(schema, repeatableRows, repeatableFileState);
+      const baseSections = buildCustomFieldsSections(schema, values, filteredRows);
+      const sections = await buildSectionsWithFiles(baseSections, filteredFileState);
       await mutateAsync({
         fullName: values['core-full-name'],
         age: parseInt(values['core-age'] ?? '0', 10),
@@ -827,38 +833,40 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
     const rows = repeatableRows[section.id] ?? [];
     const rowLabel = section.rowLabel ?? 'Item';
     const addLabel = section.addButtonLabel ?? 'Add another';
+    // No rows yet — show one editable row inline instead of an empty-state
+    // message. Nothing is written to state until the user actually types, so
+    // an untouched row never gets saved (see stripBlankRepeatableRows).
+    const isPlaceholder = rows.length === 0;
+    const displayRows = isPlaceholder ? [{}] : rows;
 
     return (
       <View key={section.id} style={styles.section}>
         <View style={styles.prescriptionsHeader}>
-          <Text style={styles.sectionTitle}>{section.name}</Text>
+          <Text style={styles.repeatableSectionTitle} numberOfLines={1}>
+            {section.name}
+          </Text>
           <Pressable onPress={() => addRow(section.id)}>
             <Text style={styles.addRxText}>+ {addLabel}</Text>
           </Pressable>
         </View>
 
-        {rows.length === 0 ? (
-          <View style={styles.prescriptionsEmpty}>
-            <Text style={styles.prescriptionsEmptyTitle}>No {rowLabel.toLowerCase()}s added yet</Text>
-            <Text style={styles.prescriptionsEmptyBody}>Tap &quot;+ {addLabel}&quot; to add the first one.</Text>
-          </View>
-        ) : (
-          rows.map((rowValues, rowIndex) => (
-            <View key={rowIndex} style={styles.rxRow}>
-              <View style={styles.rxCard}>
-                <Text style={styles.rxRowLabel}>
-                  {rowLabel} {rowIndex + 1}
-                </Text>
-                {section.fields.map((field) =>
-                  renderRepeatableField(field, rowValues, (fieldId, val) => setRowValue(section.id, rowIndex, fieldId, val), section.id, rowIndex)
-                )}
-              </View>
-              <Pressable onPress={() => removeRow(section.id, rowIndex)} style={styles.rxRemove}>
-                <X size={16} color={colors.textMuted} />
-              </Pressable>
+        {displayRows.map((rowValues, rowIndex) => (
+          <View key={rowIndex} style={styles.rxCard}>
+            <View style={styles.rxCardHeader}>
+              <Text style={styles.rxRowLabel}>
+                {rowLabel} {rowIndex + 1}
+              </Text>
+              {!isPlaceholder && (
+                <Pressable onPress={() => removeRow(section.id, rowIndex)} hitSlop={8}>
+                  <X size={16} color={colors.textMuted} />
+                </Pressable>
+              )}
             </View>
-          ))
-        )}
+            {section.fields.map((field) =>
+              renderRepeatableField(field, rowValues, (fieldId, val) => setRowValue(section.id, rowIndex, fieldId, val), section.id, rowIndex)
+            )}
+          </View>
+        ))}
       </View>
     );
   }
@@ -875,7 +883,7 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
 
   return (
     <>
-      <KeyboardAvoidingWrapper>
+      <View style={styles.flex}>
         {/* Nav bar */}
         <View style={styles.navBar}>
           <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -885,11 +893,12 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
           <View style={styles.navSpacer} />
         </View>
 
-        <ScrollView
+        <KeyboardAwareScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          bottomOffset={20}
         >
           {schema.sections.map((section) => {
             if (section.type === 'repeatable') {
@@ -913,8 +922,8 @@ function EditForm({ patient, schema, navigation, patientId }: EditFormProps) {
               <Text style={styles.deleteBtnText}>Delete Patient</Text>
             </Pressable>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingWrapper>
+        </KeyboardAwareScrollView>
+      </View>
 
       {/* ── Date picker ──────────────────────────────────────────────────────── */}
       {datePickerCtx && Platform.OS === 'android' && (
@@ -1061,6 +1070,7 @@ export function PatientEditScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   loadingPlaceholder: { flex: 1 },
+  flex: { flex: 1 },
 
   // Nav bar
   navBar: {
@@ -1119,33 +1129,23 @@ const styles = StyleSheet.create({
   prescriptionsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    gap: spacing.sm
+  },
+  // Smaller + shrinkable than sectionTitle since this one always shares its
+  // row with the add-button label — long admin-defined section names
+  // truncate instead of colliding with the button.
+  repeatableSectionTitle: {
+    flexShrink: 1,
+    fontFamily: 'FunnelSans-Bold',
+    fontWeight: '700',
+    fontSize: 16,
+    color: colors.text
   },
   addRxText: {
     fontFamily: fonts.bodySemiBold,
     fontSize: 12,
     color: colors.accent
-  },
-
-  // Empty state
-  prescriptionsEmpty: {
-    backgroundColor: colors.inputFill,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#DDD6C7',
-    padding: 14,
-    gap: 8
-  },
-  prescriptionsEmptyTitle: {
-    fontFamily: fonts.bodySemiBold,
-    fontSize: 14,
-    color: colors.text
-  },
-  prescriptionsEmptyBody: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    lineHeight: 18,
-    color: '#5F5A53'
   },
 
   // Field box (editable, label inside)
@@ -1250,13 +1250,7 @@ const styles = StyleSheet.create({
   },
 
   // Repeatable row
-  rxRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm
-  },
   rxCard: {
-    flex: 1,
     backgroundColor: colors.inputFill,
     borderRadius: 16,
     borderWidth: 1,
@@ -1265,14 +1259,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     gap: 10
   },
+  rxCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
   rxRowLabel: {
     fontFamily: fonts.bodySemiBold,
     fontSize: 12,
     color: colors.textMuted
-  },
-  rxRemove: {
-    paddingTop: 14,
-    padding: spacing.xs
   },
 
   // Actions

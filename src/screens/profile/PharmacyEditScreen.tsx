@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
@@ -7,7 +8,7 @@ import { Building2, ChevronLeft, Upload } from 'lucide-react-native';
 import { getMe, updateMe, uploadLogo } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
 import { Button, Input } from '../../components/ui';
-import { KeyboardAvoidingWrapper, ScreenWrapper } from '../../components/layout';
+import { ScreenWrapper } from '../../components/layout';
 import { colors } from '../../theme/colors';
 import { fonts } from '../../theme/typography';
 import { spacing } from '../../theme/spacing';
@@ -64,7 +65,7 @@ function PharmacyForm({ user, navigation }: PharmacyFormProps) {
   }
 
   return (
-    <KeyboardAvoidingWrapper>
+    <View style={styles.flex}>
       <View style={styles.navBar}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
           <ChevronLeft size={16} color={colors.accent} />
@@ -75,11 +76,12 @@ function PharmacyForm({ user, navigation }: PharmacyFormProps) {
         </Pressable>
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        bottomOffset={20}
       >
         {/* Logo upload */}
         <View style={styles.logoSection}>
@@ -103,8 +105,8 @@ function PharmacyForm({ user, navigation }: PharmacyFormProps) {
         <Input label="Company Name" placeholder="e.g. MedPlus Pharmacy" value={companyName} onChangeText={setCompanyName} autoCapitalize="words" />
 
         <Button title="Save Changes" onPress={handleSave} loading={isPending} disabled={isPending || isUploading} />
-      </ScrollView>
-    </KeyboardAvoidingWrapper>
+      </KeyboardAwareScrollView>
+    </View>
   );
 }
 
@@ -118,6 +120,7 @@ export function PharmacyEditScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   loadingPlaceholder: { flex: 1 },
+  flex: { flex: 1 },
   navBar: {
     flexDirection: 'row',
     alignItems: 'center',

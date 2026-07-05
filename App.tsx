@@ -7,6 +7,7 @@ import { Newsreader_400Regular_Italic, Newsreader_500Medium } from '@expo-google
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { NavigationContainer } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -59,20 +60,22 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ToastProvider>
-        <BottomSheetModalProvider>
-          <QueryClientProvider client={queryClient}>
-            <SyncProvider>
-              <AuthProvider>
-                <NavigationContainer>
-                  <RootNavigator />
-                </NavigationContainer>
-              </AuthProvider>
-            </SyncProvider>
-          </QueryClientProvider>
-        </BottomSheetModalProvider>
-        <StatusBar style="dark" />
-      </ToastProvider>
+      <KeyboardProvider>
+        <ToastProvider>
+          <BottomSheetModalProvider>
+            <QueryClientProvider client={queryClient}>
+              <SyncProvider>
+                <AuthProvider>
+                  <NavigationContainer>
+                    <RootNavigator />
+                  </NavigationContainer>
+                </AuthProvider>
+              </SyncProvider>
+            </QueryClientProvider>
+          </BottomSheetModalProvider>
+          <StatusBar style="dark" />
+        </ToastProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

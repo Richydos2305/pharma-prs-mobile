@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { useAuth } from '../../hooks/useAuth';
@@ -52,11 +53,12 @@ export function RegisterScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <ScrollView
+      <KeyboardAwareScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        bottomOffset={20}
       >
         <AuthHeader />
 
@@ -157,7 +159,7 @@ export function RegisterScreen({ navigation }: Props) {
         </View>
 
         <Text style={styles.credentialNote}>Password must be at least 8 characters and include uppercase, lowercase, and a symbol.</Text>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

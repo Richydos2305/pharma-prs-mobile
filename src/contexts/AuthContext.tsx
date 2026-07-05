@@ -65,7 +65,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const me = await getMe();
             await SecureStore.setItemAsync(USER_PROFILE_KEY, JSON.stringify(me));
-            console.log('[Auth] getMe success, userId:', me.id);
             setCurrentUserId(me.id);
             setUser(me);
           } catch (err: unknown) {
