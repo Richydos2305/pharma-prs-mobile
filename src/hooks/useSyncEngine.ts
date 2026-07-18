@@ -5,7 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 import * as syncEngine from '../services/syncEngine';
 import * as syncQueue from '../services/syncQueue';
 import { isOnlineNow, useNetworkStatus } from './useNetworkStatus';
-import { getCurrentUserId, triggerOfflineWall, triggerSyncReady, OFFLINE_THRESHOLD_MS } from '../services/userSession';
+import { getCurrentUserId, triggerOfflineWall, triggerSyncReady, setRunSyncCallback, OFFLINE_THRESHOLD_MS } from '../services/userSession';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -43,6 +43,12 @@ export function useSyncEngine(): {
       setPendingCount(count);
     }
   }, [queryClient, showToast]);
+
+  // Let AuthContext trigger a sync as soon as a user is authenticated
+  useEffect(() => {
+    setRunSyncCallback(() => void runSync());
+    return () => setRunSyncCallback(() => {});
+  }, [runSync]);
 
   // On mount: read pending count and attempt immediate sync if online
   useEffect(() => {

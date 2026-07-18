@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { login as apiLogin, logout as apiLogout, register as apiRegister } from '../api/auth';
 import { getMe } from '../api/users';
 import { TOKEN_KEYS, setLogoutCallback } from '../api/client';
-import { setCurrentUserId, setOfflineWallCallback, setSyncReadyCallback } from '../services/userSession';
+import { setCurrentUserId, setOfflineWallCallback, setSyncReadyCallback, triggerRunSync } from '../services/userSession';
 import type { IUser, LoginPayload, RegisterPayload } from '../types';
 
 const USER_PROFILE_KEY = 'userProfile';
@@ -66,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const me = await getMe();
             await SecureStore.setItemAsync(USER_PROFILE_KEY, JSON.stringify(me));
             setCurrentUserId(me.id);
+            triggerRunSync();
             setUser(me);
           } catch (err: unknown) {
             const status = (err as { response?: { status?: number } })?.response?.status;
@@ -99,6 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const me = await getMe();
     await SecureStore.setItemAsync(USER_PROFILE_KEY, JSON.stringify(me));
     setCurrentUserId(me.id);
+    triggerRunSync();
     setUser(me);
   }, []);
 

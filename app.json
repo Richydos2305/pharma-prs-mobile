@@ -15,7 +15,7 @@
     },
     "android": {
       "package": "com.pharmaprs",
-      "versionCode": 5,
+      "versionCode": 7,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
