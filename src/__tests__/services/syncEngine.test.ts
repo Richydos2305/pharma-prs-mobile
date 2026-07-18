@@ -38,15 +38,9 @@ jest.mock('../../api/settings', () => ({
   getSettings: jest.fn()
 }));
 
-jest.mock('../../api/queue', () => ({
-  apiEnqueueJob: jest.fn(),
-  apiGetJobStatus: jest.fn()
-}));
-
 import * as syncQueue from '../../services/syncQueue';
 import * as patientLocalRepository from '../../services/patientLocalRepository';
 import { apiClient } from '../../api/client';
-import { apiEnqueueJob, apiGetJobStatus } from '../../api/queue';
 
 const mockQueryClient = {
   invalidateQueries: jest.fn()
@@ -79,6 +73,18 @@ function makeQueueEntry(overrides: Partial<QueueEntry> = {}): QueueEntry {
   };
 }
 
+function makeAxiosError(status: number, data?: { message?: string }) {
+  return {
+    isAxiosError: true,
+    response: { status, data },
+    message: `Request failed with status code ${status}`
+  };
+}
+
+function makeNetworkError() {
+  return new Error('Network Error');
+}
+
 describe('syncEngine.run', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -99,9 +105,6 @@ describe('syncEngine.run', () => {
     (apiClient.put as jest.Mock).mockResolvedValue(undefined);
     (apiClient.delete as jest.Mock).mockResolvedValue(undefined);
 
-    (apiEnqueueJob as jest.Mock).mockResolvedValue({ jobId: 'job-1' });
-    (apiGetJobStatus as jest.Mock).mockResolvedValue({ status: 'completed' });
-
     (mockQueryClient.invalidateQueries as jest.Mock).mockResolvedValue(undefined);
   });
 
@@ -121,8 +124,8 @@ describe('syncEngine.run', () => {
     });
   });
 
-  describe('push phase — Phase 1 (BullMQ)', () => {
-    it('enqueues CREATE_PATIENT with _id set to localId and marks synced on job completion', async () => {
+  describe('push phase — Phase 1 (direct REST)', () => {
+    it('POSTs to /api/patients with _id set to the local id and marks synced', async () => {
       const payload = { fullName: 'John', age: 30, phoneNumber: '07000' };
       (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
         makeQueueEntry({ id: 'q1', operationType: 'CREATE_PATIENT', entityId: 'local-id', payload })
@@ -130,45 +133,127 @@ describe('syncEngine.run', () => {
 
       await run(mockQueryClient);
 
-      expect(apiEnqueueJob).toHaveBeenCalledWith('CREATE_PATIENT', 'local-id', { _id: 'local-id', ...payload });
+      expect(apiClient.post).toHaveBeenCalledWith('/api/patients', { _id: 'local-id', ...payload });
       expect(syncQueue.markSynced).toHaveBeenCalledWith('q1');
     });
 
-    it('enqueues DELETE_PATIENT, hardDeletes locally, and marks synced on job completion', async () => {
+    it('PUTs to /api/patients/:id with the payload and marks synced', async () => {
+      const payload = { fullName: 'Jane' };
+      (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
+        makeQueueEntry({ id: 'q1', operationType: 'UPDATE_PATIENT', entityId: 'p1', payload })
+      ]);
+
+      await run(mockQueryClient);
+
+      expect(apiClient.put).toHaveBeenCalledWith('/api/patients/p1', payload);
+      expect(syncQueue.markSynced).toHaveBeenCalledWith('q1');
+    });
+
+    it('DELETEs /api/patients/:id, hardDeletes locally, and marks synced', async () => {
       (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
         makeQueueEntry({ id: 'q1', operationType: 'DELETE_PATIENT', entityId: 'p1', payload: {} })
       ]);
 
       await run(mockQueryClient);
 
-      expect(apiEnqueueJob).toHaveBeenCalledWith('DELETE_PATIENT', 'p1', { id: 'p1' });
+      expect(apiClient.delete).toHaveBeenCalledWith('/api/patients/p1');
       expect(patientLocalRepository.hardDelete).toHaveBeenCalledWith('p1');
       expect(syncQueue.markSynced).toHaveBeenCalledWith('q1');
     });
 
-    it('calls markFailed with the job error when a BullMQ job fails', async () => {
+    it('DELETEs /api/files/:publicId with the publicId URL-encoded and marks synced', async () => {
+      (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
+        makeQueueEntry({
+          id: 'q1',
+          operationType: 'DELETE_FILE',
+          entityId: 'p1',
+          payload: { publicId: 'patient-records/abc123' }
+        })
+      ]);
+
+      await run(mockQueryClient);
+
+      expect(apiClient.delete).toHaveBeenCalledWith('/api/files/patient-records%2Fabc123');
+      expect(syncQueue.markSynced).toHaveBeenCalledWith('q1');
+    });
+
+    it('marks failed with the server error message on a permanent (4xx) error', async () => {
       (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
         makeQueueEntry({ id: 'q1', operationType: 'CREATE_PATIENT', entityId: 'p1', payload: {} })
       ]);
-      (apiGetJobStatus as jest.Mock).mockResolvedValue({ status: 'failed', error: 'Duplicate key' });
+      (apiClient.post as jest.Mock).mockRejectedValue(makeAxiosError(400, { message: 'Validation failed' }));
 
-      await run(mockQueryClient);
+      const result = await run(mockQueryClient);
 
-      expect(syncQueue.markFailed).toHaveBeenCalledWith('q1', 'Duplicate key');
+      expect(syncQueue.markFailed).toHaveBeenCalledWith('q1', 'Validation failed');
+      expect(syncQueue.markSynced).not.toHaveBeenCalled();
+      expect(result.conflicts).toBe(1);
     });
 
-    it('aborts and skips remaining non-upload entries when apiEnqueueJob throws', async () => {
+    it('leaves the entry pending (does not mark failed) after a transient error exhausts retries', async () => {
       (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
-        makeQueueEntry({ id: 'q1', operationType: 'CREATE_PATIENT', entityId: 'e1', timestamp: 1 }),
-        makeQueueEntry({ id: 'q2', operationType: 'UPDATE_PATIENT', entityId: 'e2', timestamp: 2 })
+        makeQueueEntry({ id: 'q1', operationType: 'CREATE_PATIENT', entityId: 'p1', payload: {} })
       ]);
-      (apiEnqueueJob as jest.Mock).mockRejectedValue(new Error('Network error'));
+      (apiClient.post as jest.Mock).mockRejectedValue(makeNetworkError());
+
+      const result = await run(mockQueryClient);
+
+      expect(apiClient.post).toHaveBeenCalledTimes(3);
+      expect(syncQueue.markFailed).not.toHaveBeenCalled();
+      expect(syncQueue.markSynced).not.toHaveBeenCalled();
+      expect(result.conflicts).toBe(0);
+      expect(result.synced).toBe(0);
+    }, 10000);
+
+    it('retries a transient error and succeeds on a later attempt', async () => {
+      (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
+        makeQueueEntry({ id: 'q1', operationType: 'CREATE_PATIENT', entityId: 'p1', payload: {} })
+      ]);
+      (apiClient.post as jest.Mock).mockRejectedValueOnce(makeNetworkError()).mockResolvedValueOnce({ data: {} });
 
       await run(mockQueryClient);
 
-      expect(apiEnqueueJob).toHaveBeenCalledTimes(1);
+      expect(apiClient.post).toHaveBeenCalledTimes(2);
+      expect(syncQueue.markSynced).toHaveBeenCalledWith('q1');
+    });
+
+    it('treats a 404 on DELETE_PATIENT as success (idempotent delete)', async () => {
+      (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
+        makeQueueEntry({ id: 'q1', operationType: 'DELETE_PATIENT', entityId: 'p1', payload: {} })
+      ]);
+      (apiClient.delete as jest.Mock).mockRejectedValue(makeAxiosError(404));
+
+      await run(mockQueryClient);
+
+      expect(patientLocalRepository.hardDelete).toHaveBeenCalledWith('p1');
+      expect(syncQueue.markSynced).toHaveBeenCalledWith('q1');
       expect(syncQueue.markFailed).not.toHaveBeenCalled();
-      expect(syncQueue.markSynced).not.toHaveBeenCalled();
+    });
+
+    it('treats a 404 on DELETE_FILE as success (idempotent delete)', async () => {
+      (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
+        makeQueueEntry({ id: 'q1', operationType: 'DELETE_FILE', entityId: 'p1', payload: { publicId: 'pub123' } })
+      ]);
+      (apiClient.delete as jest.Mock).mockRejectedValue(makeAxiosError(404));
+
+      await run(mockQueryClient);
+
+      expect(syncQueue.markSynced).toHaveBeenCalledWith('q1');
+      expect(syncQueue.markFailed).not.toHaveBeenCalled();
+    });
+
+    it('processes each entry independently — one entry failing permanently does not block others', async () => {
+      (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
+        makeQueueEntry({ id: 'q1', operationType: 'CREATE_PATIENT', entityId: 'e1', timestamp: 1, payload: {} }),
+        makeQueueEntry({ id: 'q2', operationType: 'UPDATE_PATIENT', entityId: 'e2', timestamp: 2, payload: { fullName: 'X' } })
+      ]);
+      (apiClient.post as jest.Mock).mockRejectedValue(makeAxiosError(400, { message: 'Bad request' }));
+
+      await run(mockQueryClient);
+
+      expect(apiClient.put).toHaveBeenCalledWith('/api/patients/e2', { fullName: 'X' });
+      expect(syncQueue.markFailed).toHaveBeenCalledWith('q1', 'Bad request');
+      expect(syncQueue.markSynced).toHaveBeenCalledWith('q2');
     });
   });
 
@@ -201,7 +286,7 @@ describe('syncEngine.run', () => {
       expect(syncQueue.markSynced).toHaveBeenCalledWith('q1');
     });
 
-    it('skips UPLOAD_FILE and leaves it in queue when the patient Phase 1 job failed', async () => {
+    it('skips UPLOAD_FILE and leaves it in queue when the patient Phase 1 op did not sync', async () => {
       (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
         makeQueueEntry({ id: 'q1', operationType: 'CREATE_PATIENT', entityId: 'p1', payload: {} }),
         makeQueueEntry({
@@ -211,7 +296,7 @@ describe('syncEngine.run', () => {
           payload: { localPath: '/tmp/f.pdf', fileName: 'f.pdf', mimeType: 'application/pdf' }
         })
       ]);
-      (apiGetJobStatus as jest.Mock).mockResolvedValue({ status: 'failed', error: 'Error' });
+      (apiClient.post as jest.Mock).mockRejectedValue(makeAxiosError(400, { message: 'Error' }));
 
       await run(mockQueryClient);
 
@@ -219,7 +304,7 @@ describe('syncEngine.run', () => {
       expect(syncQueue.markFailed).toHaveBeenCalledTimes(1);
       expect(syncQueue.markFailed).toHaveBeenCalledWith('q1', 'Error');
       expect(syncQueue.markSynced).not.toHaveBeenCalled();
-      expect(apiClient.post).not.toHaveBeenCalled();
+      expect(apiClient.post).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -248,6 +333,19 @@ describe('syncEngine.run', () => {
 
       expect(patientLocalRepository.hardDelete).not.toHaveBeenCalled();
     });
+
+    it('self-heals a CREATE_PATIENT entry whose response was lost but the patient exists on the server', async () => {
+      (syncQueue.getPendingQueue as jest.Mock).mockResolvedValue([
+        makeQueueEntry({ id: 'q1', operationType: 'CREATE_PATIENT', entityId: 'p1', payload: {} })
+      ]);
+      (apiClient.post as jest.Mock).mockRejectedValue(makeNetworkError());
+      (apiClient.get as jest.Mock).mockResolvedValue({ data: { data: { patients: [makePatient({ id: 'p1' })], total: 1 } } });
+
+      await run(mockQueryClient);
+
+      expect(syncQueue.markSynced).toHaveBeenCalledWith('q1');
+      expect(syncQueue.markFailed).not.toHaveBeenCalled();
+    }, 10000);
   });
 
   describe('post-sync', () => {

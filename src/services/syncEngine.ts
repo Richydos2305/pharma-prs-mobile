@@ -1,8 +1,8 @@
+import axios from 'axios';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { QueryClient } from '@tanstack/react-query';
 
 import { apiClient } from '../api/client';
-import { apiEnqueueJob, apiGetJobStatus } from '../api/queue';
 import { getSettings as apiFetchSettings } from '../api/settings';
 import { listPharmacists } from '../api/pharmacists';
 import { queryKeys } from '../api/queryKeys';
@@ -49,6 +49,64 @@ async function apiListPatients(): Promise<IPatient[]> {
   return data.data.patients;
 }
 
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 500;
+
+function isTransientError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return true;
+  if (!err.response) return true;
+  return err.response.status >= 500;
+}
+
+function isNotFoundError(err: unknown): boolean {
+  return axios.isAxiosError(err) && err.response?.status === 404;
+}
+
+function extractErrorMessage(err: unknown): string {
+  if (axios.isAxiosError(err)) {
+    const msg = (err.response?.data as { message?: string } | undefined)?.message;
+    if (msg) return msg;
+  }
+  return err instanceof Error ? err.message : 'Sync failed';
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt >= RETRY_ATTEMPTS - 1 || !isTransientError(err)) throw err;
+      await sleep(RETRY_BASE_DELAY_MS * 2 ** attempt);
+    }
+  }
+}
+
+async function performDirectOp(entry: QueueEntry): Promise<void> {
+  const payload = entry.payload as Record<string, unknown>;
+  switch (entry.operationType) {
+    case 'CREATE_PATIENT':
+      await apiClient.post('/api/patients', { _id: entry.entityId, ...payload });
+      return;
+    case 'UPDATE_PATIENT':
+      await apiClient.put(`/api/patients/${entry.entityId}`, payload);
+      return;
+    case 'DELETE_PATIENT':
+      await apiClient.delete(`/api/patients/${entry.entityId}`);
+      return;
+    case 'DELETE_FILE': {
+      const { publicId } = payload as { publicId: string };
+      await apiClient.delete(`/api/files/${encodeURIComponent(publicId)}`);
+      return;
+    }
+    default:
+      return; // UPLOAD_FILE is handled in Phase 2
+  }
+}
+
 export async function run(queryClient: QueryClient): Promise<{ synced: number; conflicts: number }> {
   if (isRunning) return { synced: 0, conflicts: 0 };
   isRunning = true;
@@ -59,87 +117,47 @@ export async function run(queryClient: QueryClient): Promise<{ synced: number; c
   try {
     const queue = await syncQueue.getPendingQueue();
 
-    // ─── Phase 1: Enqueue all non-upload ops to BullMQ, then poll ───────────────
-    const jobEntryMap = new Map<string, QueueEntry>(); // jobId → queue entry
-    const failedEntityIds = new Set<string>();
-    let pushAborted = false;
+    // ─── Phase 1: Push non-upload ops directly via REST, with client-side retry ──
+    const notSyncedEntityIds = new Set<string>();
 
     for (const entry of queue) {
       if (entry.operationType === 'UPLOAD_FILE') continue;
-      if (pushAborted) break;
 
       try {
-        let data: object;
-        const payload = entry.payload as Record<string, unknown>;
-
-        if (entry.operationType === 'CREATE_PATIENT') {
-          data = { _id: entry.entityId, ...payload };
-        } else if (entry.operationType === 'UPDATE_PATIENT') {
-          data = { id: entry.entityId, body: payload };
-        } else if (entry.operationType === 'DELETE_PATIENT') {
-          data = { id: entry.entityId };
-        } else {
-          // DELETE_FILE — payload is { publicId }
-          data = payload;
+        await withRetry(() => performDirectOp(entry));
+        if (entry.operationType === 'DELETE_PATIENT') {
+          await patientLocalRepository.hardDelete(entry.entityId);
         }
-
-        const { jobId } = await apiEnqueueJob(entry.operationType, entry.entityId, data);
-        jobEntryMap.set(jobId, entry);
-      } catch {
-        pushAborted = true;
-        failedEntityIds.add(entry.entityId);
-      }
-    }
-
-    // Poll until all enqueued jobs complete, fail, or timeout
-    if (jobEntryMap.size > 0) {
-      const pendingJobIds = new Set(jobEntryMap.keys());
-      const TIMEOUT_MS = 30_000;
-      const POLL_INTERVAL_MS = 500;
-      const deadline = Date.now() + TIMEOUT_MS;
-
-      while (pendingJobIds.size > 0 && Date.now() < deadline) {
-        await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-
-        for (const jobId of [...pendingJobIds]) {
-          try {
-            const { status, error } = await apiGetJobStatus(jobId);
-            if (status === 'completed' || status === 'failed') {
-              pendingJobIds.delete(jobId);
-              const entry = jobEntryMap.get(jobId)!;
-
-              if (status === 'failed') {
-                failedEntityIds.add(entry.entityId);
-                await syncQueue.markFailed(entry.id, error ?? 'Job failed');
-                conflicts++;
-              } else {
-                if (entry.operationType === 'DELETE_PATIENT') {
-                  await patientLocalRepository.hardDelete(entry.entityId);
-                }
-                await syncQueue.markSynced(entry.id);
-                synced++;
-              }
-            }
-          } catch {
-            // transient poll error — retry next iteration
+        await syncQueue.markSynced(entry.id);
+        synced++;
+      } catch (err) {
+        if ((entry.operationType === 'DELETE_PATIENT' || entry.operationType === 'DELETE_FILE') && isNotFoundError(err)) {
+          // Already gone server-side (e.g. a previous attempt's response was lost) — deletes are idempotent.
+          if (entry.operationType === 'DELETE_PATIENT') {
+            await patientLocalRepository.hardDelete(entry.entityId);
           }
+          await syncQueue.markSynced(entry.id);
+          synced++;
+          continue;
         }
-      }
 
-      // Any jobs still pending after timeout
-      for (const jobId of pendingJobIds) {
-        const entry = jobEntryMap.get(jobId)!;
-        failedEntityIds.add(entry.entityId);
-        await syncQueue.markFailed(entry.id, 'Sync timeout');
-        conflicts++;
+        notSyncedEntityIds.add(entry.entityId);
+        if (isTransientError(err)) {
+          // Leave as 'pending' — retried automatically on the next sync run
+          // (5-min interval or reconnect trigger in useSyncEngine), since
+          // there's no server-side job queue to retry on our behalf anymore.
+        } else {
+          await syncQueue.markFailed(entry.id, extractErrorMessage(err));
+          conflicts++;
+        }
       }
     }
 
     // ─── Phase 2: File uploads ───────────────────────────────────────────────────
     for (const entry of queue) {
       if (entry.operationType !== 'UPLOAD_FILE') continue;
-      // Skip if the patient's Phase 1 job failed — patient doesn't exist on server yet
-      if (failedEntityIds.has(entry.entityId)) continue;
+      // Skip if the patient's Phase 1 op didn't sync — patient may not exist on server yet
+      if (notSyncedEntityIds.has(entry.entityId)) continue;
 
       try {
         const { localPath, fileName, mimeType } = entry.payload as UploadFilePayload;
@@ -171,6 +189,19 @@ export async function run(queryClient: QueryClient): Promise<{ synced: number; c
     // ─── Phase 3: Pull reconcile ─────────────────────────────────────────────────
     const serverPatients = await apiListPatients();
     const serverIdSet = new Set(serverPatients.map((p) => p.id));
+
+    // Self-heal: a CREATE/UPDATE that looked unsynced this run (e.g. its response was
+    // lost to a network blip after the request actually succeeded) but is demonstrably
+    // present on the server now — mark it synced instead of retrying/failing forever.
+    for (const entry of queue) {
+      if (
+        (entry.operationType === 'CREATE_PATIENT' || entry.operationType === 'UPDATE_PATIENT') &&
+        notSyncedEntityIds.has(entry.entityId) &&
+        serverIdSet.has(entry.entityId)
+      ) {
+        await syncQueue.markSynced(entry.id);
+      }
+    }
 
     for (const serverPatient of serverPatients) {
       await patientLocalRepository.upsertFromServer(serverPatient);

@@ -1,6 +1,7 @@
 let _currentUserId = '';
 let _offlineWallCallback: (() => void) | null = null;
 let _syncReadyCallback: (() => void) | null = null;
+let _runSyncCallback: (() => void) | null = null;
 
 export const OFFLINE_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 
@@ -26,4 +27,12 @@ export function setSyncReadyCallback(cb: () => void): void {
 
 export function triggerSyncReady(): void {
   _syncReadyCallback?.();
+}
+
+export function setRunSyncCallback(cb: () => void): void {
+  _runSyncCallback = cb;
+}
+
+export function triggerRunSync(): void {
+  _runSyncCallback?.();
 }
