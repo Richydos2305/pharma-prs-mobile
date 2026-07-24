@@ -1,23 +1,28 @@
 import { apiClient } from './client';
+import * as pharmacistsLocalRepository from '../services/pharmacistsLocalRepository';
 import type { IPharmacist } from '../types';
 
 type RawPharmacist = Omit<IPharmacist, 'id'> & { _id: string };
 
 function normalize(raw: RawPharmacist): IPharmacist {
-  return { id: raw._id, name: raw.name, phoneNumber: raw.phoneNumber };
+  return { id: raw._id, name: raw.name, phoneNumber: raw.phoneNumber, branch: raw.branch };
 }
 
 export async function listPharmacists(): Promise<IPharmacist[]> {
-  const { data } = await apiClient.get<{ data: { pharmacists: RawPharmacist[]; total: number } }>('/api/pharmacists');
-  return data.data.pharmacists.map(normalize);
+  try {
+    const { data } = await apiClient.get<{ data: { pharmacists: RawPharmacist[]; total: number } }>('/api/pharmacists');
+    return data.data.pharmacists.map(normalize);
+  } catch {
+    return pharmacistsLocalRepository.list();
+  }
 }
 
-export async function createPharmacist(payload: { name: string; phoneNumber?: string }): Promise<IPharmacist> {
+export async function createPharmacist(payload: { name: string; phoneNumber?: string; branch?: string }): Promise<IPharmacist> {
   const { data } = await apiClient.post<{ data: RawPharmacist }>('/api/pharmacists', payload);
   return normalize(data.data);
 }
 
-export async function updatePharmacist(id: string, payload: { name?: string; phoneNumber?: string }): Promise<IPharmacist> {
+export async function updatePharmacist(id: string, payload: { name?: string; phoneNumber?: string; branch?: string }): Promise<IPharmacist> {
   const { data } = await apiClient.put<{ data: RawPharmacist }>(`/api/pharmacists/${id}`, payload);
   return normalize(data.data);
 }

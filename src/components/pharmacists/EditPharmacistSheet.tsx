@@ -1,16 +1,20 @@
-import { forwardRef, useState } from 'react';
+import { forwardRef, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { BottomSheetModal } from '@gorhom/bottom-sheet';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronDown } from 'lucide-react-native';
 import { updatePharmacist } from '../../api/pharmacists';
+import { getMe } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { BottomSheetWrapper, Button } from '../ui';
+import { BranchPickerSheet } from './BranchPickerSheet';
 import { colors } from '../../theme/colors';
 import { fonts } from '../../theme/typography';
 import { spacing } from '../../theme/spacing';
 import type { IPharmacist } from '../../types';
 
-export const EDIT_SNAP = ['45%'];
+export const EDIT_SNAP = ['58%'];
 
 interface EditPharmacistSheetProps {
   pharmacist: IPharmacist | null;
@@ -20,12 +24,18 @@ interface EditPharmacistSheetProps {
 
 export const EditPharmacistSheet = forwardRef<BottomSheetModal, EditPharmacistSheetProps>(({ pharmacist, onClose, onSuccess }, ref) => {
   const queryClient = useQueryClient();
+  const branchPickerRef = useRef<BottomSheetModal>(null);
   // State is initialised from pharmacist on mount. Use key={pharmacist.id} on
   // the parent instance to remount whenever a different pharmacist is selected.
   const [name, setName] = useState(pharmacist?.name ?? '');
   const [phoneNumber, setPhoneNumber] = useState(pharmacist?.phoneNumber ?? '');
+  const [branch, setBranch] = useState<string | undefined>(pharmacist?.branch);
   const [nameError, setNameError] = useState('');
+  const [branchError, setBranchError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { data: user } = useQuery({ queryKey: queryKeys.me, queryFn: getMe });
+  const branches = user?.branches ?? [];
 
   async function handleSave() {
     if (!pharmacist) return;
@@ -34,10 +44,12 @@ export const EditPharmacistSheet = forwardRef<BottomSheetModal, EditPharmacistSh
       return;
     }
     setIsSubmitting(true);
+    setBranchError('');
     try {
       const updated = await updatePharmacist(pharmacist.id, {
         name: name.trim(),
-        phoneNumber: phoneNumber.trim() || undefined
+        phoneNumber: phoneNumber.trim() || undefined,
+        branch
       });
       const current = queryClient.getQueryData<IPharmacist[]>(queryKeys.pharmacists) ?? [];
       queryClient.setQueryData(
@@ -46,56 +58,82 @@ export const EditPharmacistSheet = forwardRef<BottomSheetModal, EditPharmacistSh
       );
       onSuccess?.();
       onClose();
+    } catch (err) {
+      setBranchError(getApiErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <BottomSheetWrapper ref={ref} snapPoints={EDIT_SNAP} onClose={onClose}>
-      <View style={styles.content}>
-        {/* Title */}
-        <Text style={styles.title}>Edit Pharmacist</Text>
+    <>
+      <BottomSheetWrapper ref={ref} snapPoints={EDIT_SNAP} onClose={onClose}>
+        <View style={styles.content}>
+          {/* Title */}
+          <Text style={styles.title}>Edit Pharmacist</Text>
 
-        {/* Name field */}
-        <View style={styles.fieldWrap}>
-          <View style={[styles.fieldBox, nameError ? styles.fieldBoxError : null]}>
-            <Text style={styles.fieldBoxLabel}>Name</Text>
+          {/* Name field */}
+          <View style={styles.fieldWrap}>
+            <View style={[styles.fieldBox, nameError ? styles.fieldBoxError : null]}>
+              <Text style={styles.fieldBoxLabel}>Name</Text>
+              <TextInput
+                style={styles.fieldBoxInput}
+                value={name}
+                onChangeText={(v) => {
+                  setName(v);
+                  if (nameError) setNameError('');
+                }}
+                placeholder="e.g. Dr. Sarah Ade"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="words"
+              />
+            </View>
+            {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
+          </View>
+
+          {/* Phone Number field */}
+          <View style={styles.fieldBox}>
+            <Text style={styles.fieldBoxLabel}>Phone Number</Text>
             <TextInput
               style={styles.fieldBoxInput}
-              value={name}
-              onChangeText={(v) => {
-                setName(v);
-                if (nameError) setNameError('');
-              }}
-              placeholder="e.g. Dr. Sarah Ade"
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              placeholder="+234 800 000 0000"
               placeholderTextColor={colors.textMuted}
-              autoCapitalize="words"
+              keyboardType="phone-pad"
             />
           </View>
-          {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
-        </View>
 
-        {/* Phone Number field */}
-        <View style={styles.fieldBox}>
-          <Text style={styles.fieldBoxLabel}>Phone Number</Text>
-          <TextInput
-            style={styles.fieldBoxInput}
-            value={phoneNumber}
-            onChangeText={setPhoneNumber}
-            placeholder="+234 800 000 0000"
-            placeholderTextColor={colors.textMuted}
-            keyboardType="phone-pad"
-          />
-        </View>
+          {/* Branch field */}
+          <View style={styles.fieldWrap}>
+            <Pressable
+              style={[styles.fieldBox, styles.branchField, branchError ? styles.fieldBoxError : null]}
+              onPress={() => branchPickerRef.current?.present()}
+            >
+              <View>
+                <Text style={styles.fieldBoxLabel}>Branch</Text>
+                <Text style={styles.fieldBoxInput}>{branch ?? 'No branch selected'}</Text>
+              </View>
+              <ChevronDown size={16} color={colors.textMuted} />
+            </Pressable>
+            {branchError ? <Text style={styles.errorText}>{branchError}</Text> : null}
+          </View>
 
-        {/* Actions */}
-        <Button title="Save Changes" onPress={handleSave} loading={isSubmitting} disabled={isSubmitting} />
-        <Pressable onPress={onClose} style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.85 }]}>
-          <Text style={styles.cancelBtnText}>Cancel</Text>
-        </Pressable>
-      </View>
-    </BottomSheetWrapper>
+          {/* Actions */}
+          <Button title="Save Changes" onPress={handleSave} loading={isSubmitting} disabled={isSubmitting} />
+          <Pressable onPress={onClose} style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.85 }]}>
+            <Text style={styles.cancelBtnText}>Cancel</Text>
+          </Pressable>
+        </View>
+      </BottomSheetWrapper>
+      <BranchPickerSheet
+        ref={branchPickerRef}
+        branches={branches}
+        selected={branch}
+        onSelect={setBranch}
+        onClose={() => branchPickerRef.current?.dismiss()}
+      />
+    </>
   );
 });
 
@@ -128,6 +166,11 @@ const styles = StyleSheet.create({
     gap: 4
   },
   fieldBoxError: { borderColor: colors.error },
+  branchField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
   fieldBoxLabel: {
     fontFamily: fonts.bodySemiBold,
     fontSize: 12,

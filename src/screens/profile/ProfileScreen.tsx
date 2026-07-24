@@ -120,6 +120,19 @@ export function ProfileScreen() {
               {user ? <Avatar name={user.companyName ?? user.fullName} size={48} imageUri={user.companyLogo} /> : null}
               <Text style={styles.pharmacyName}>{user?.companyName ?? '—'}</Text>
             </View>
+            {user?.branches && user.branches.length > 0 ? (
+              <>
+                <View style={styles.divider} />
+                <Text style={styles.branchesLabel}>Branches</Text>
+                <View style={styles.branchList}>
+                  {user.branches.map((branch, index) => (
+                    <View key={branch} style={[styles.branchRow, index === user.branches.length - 1 && styles.branchRowLast]}>
+                      <Text style={styles.branchRowName}>{branch}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : null}
           </Animated.View>
 
           {/* Patient Form */}
@@ -210,6 +223,12 @@ const styles = StyleSheet.create({
   // Pharmacy row
   pharmacyRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   pharmacyName: { fontFamily: fonts.bodySemiBold, fontSize: 14, color: colors.text },
+  // Branches
+  branchesLabel: { fontFamily: fonts.bodySemiBold, fontSize: 12, color: colors.textMuted },
+  branchList: { gap: 2 },
+  branchRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#E8E3D8' },
+  branchRowLast: { borderBottomWidth: 0, paddingBottom: 0 },
+  branchRowName: { fontFamily: fonts.body, fontWeight: '500', fontSize: 14, color: colors.text },
   // Form builder button
   formBuilderBtn: {
     flexDirection: 'row',

@@ -19,6 +19,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { Filter, Plus, Search, SlidersHorizontal } from 'lucide-react-native';
 import { listPatients } from '../../api/patients';
+import { listPharmacists } from '../../api/pharmacists';
 import { getMe } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
 import { Avatar, AnimatedPressable } from '../../components/ui';
@@ -142,6 +143,19 @@ export function PatientListScreen() {
     queryFn: () => listPatients()
   });
 
+  const { data: pharmacists } = useQuery({
+    queryKey: queryKeys.pharmacists,
+    queryFn: listPharmacists
+  });
+
+  const pharmacistBranch = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ph of pharmacists ?? []) {
+      if (ph.branch) map.set(ph.name, ph.branch);
+    }
+    return map;
+  }, [pharmacists]);
+
   const filtered = useMemo(() => {
     // eslint-disable-next-line react-hooks/purity
     const now = Date.now();
@@ -189,6 +203,13 @@ export function PatientListScreen() {
         if (filterParams.pharmacistNames && filterParams.pharmacistNames.length > 0) {
           if (!filterParams.pharmacistNames.some((n) => p.pharmacistName.includes(n))) return false;
         }
+        if (filterParams.branchNames && filterParams.branchNames.length > 0) {
+          const matches = p.pharmacistName.some((n) => {
+            const branch = pharmacistBranch.get(n);
+            return branch && filterParams.branchNames?.includes(branch);
+          });
+          if (!matches) return false;
+        }
         return true;
       })
       .sort((a, b) => {
@@ -200,19 +221,21 @@ export function PatientListScreen() {
         if (sortKey === 'age-desc') return b.age - a.age;
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
-  }, [patients, debouncedSearch, filterParams, sortKey]);
+  }, [patients, debouncedSearch, filterParams, sortKey, pharmacistBranch]);
 
   const hasActiveFilter =
     !!filterParams.ageGroup ||
     !!(filterParams.lastApptPreset || filterParams.lastApptFrom || filterParams.lastApptTo) ||
     !!(filterParams.dateRegisteredPreset || filterParams.dateRegisteredFrom || filterParams.dateRegisteredTo) ||
-    (filterParams.pharmacistNames?.length ?? 0) > 0;
+    (filterParams.pharmacistNames?.length ?? 0) > 0 ||
+    (filterParams.branchNames?.length ?? 0) > 0;
 
   const activeFilterCount =
     (filterParams.ageGroup ? 1 : 0) +
     (filterParams.lastApptPreset || filterParams.lastApptFrom || filterParams.lastApptTo ? 1 : 0) +
     (filterParams.dateRegisteredPreset || filterParams.dateRegisteredFrom || filterParams.dateRegisteredTo ? 1 : 0) +
-    ((filterParams.pharmacistNames?.length ?? 0) > 0 ? 1 : 0);
+    ((filterParams.pharmacistNames?.length ?? 0) > 0 ? 1 : 0) +
+    ((filterParams.branchNames?.length ?? 0) > 0 ? 1 : 0);
 
   const filterBadgeScale = useSharedValue(1);
   const filterBadgeAnimStyle = useAnimatedStyle(() => ({ transform: [{ scale: filterBadgeScale.value }] }));
