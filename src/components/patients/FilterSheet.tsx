@@ -18,6 +18,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { X, Calendar, Info, Check, CircleCheck } from 'lucide-react-native';
 import { useQuery } from '@tanstack/react-query';
 import { listPharmacists } from '../../api/pharmacists';
+import { getMe } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
 import { AnimatedPressable, BottomSheetWrapper } from '../ui';
 import { usePressSpring } from '../../hooks/usePressSpring';
@@ -40,17 +41,19 @@ export interface FilterParams {
   dateRegisteredFrom?: string;
   dateRegisteredTo?: string;
   pharmacistNames?: string[];
+  branchNames?: string[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-type TabId = 'age' | 'lastAppt' | 'dateReg' | 'pharmacist';
+type TabId = 'age' | 'lastAppt' | 'dateReg' | 'pharmacist' | 'branch';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'age', label: 'Age Group' },
   { id: 'lastAppt', label: 'Last Appointment' },
   { id: 'dateReg', label: 'Date Registered' },
-  { id: 'pharmacist', label: 'Pharmacist' }
+  { id: 'pharmacist', label: 'Pharmacist' },
+  { id: 'branch', label: 'Branch' }
 ];
 
 const AGE_OPTIONS: { value: FilterParams['ageGroup']; label: string }[] = [
@@ -252,6 +255,40 @@ function PharmacistPane({
   );
 }
 
+function BranchPane({
+  branchNames,
+  allNames,
+  onToggle,
+  onClearAll
+}: {
+  branchNames: string[];
+  allNames: string[];
+  onToggle: (name: string) => void;
+  onClearAll: () => void;
+}) {
+  return (
+    <View style={[paneStyles.container, paneStyles.gapXs]}>
+      <Text style={paneStyles.sectionLabel}>BRANCH</Text>
+      <Text style={paneStyles.subtitle}>Select one or more branches to narrow results</Text>
+      <View style={paneStyles.pillCenterRow}>
+        <Pressable style={[paneStyles.pill, branchNames.length === 0 && paneStyles.pillSelected]} onPress={onClearAll}>
+          <Text style={[paneStyles.pillText, branchNames.length === 0 && paneStyles.pillTextSelected]}>All Branches</Text>
+        </Pressable>
+      </View>
+      <View style={paneStyles.pillRow}>
+        {allNames.map((name) => {
+          const isSelected = branchNames.includes(name);
+          return (
+            <Pressable key={name} style={[paneStyles.pill, isSelected && paneStyles.pillSelected]} onPress={() => onToggle(name)}>
+              <Text style={[paneStyles.pillText, isSelected && paneStyles.pillTextSelected]}>{name}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 function TabChip({ tab, isActive, badge, onPress }: { tab: { id: TabId; label: string }; isActive: boolean; badge: number; onPress: () => void }) {
   const { animatedStyle, onPressIn, onPressOut } = usePressSpring(0.96);
   return (
@@ -291,6 +328,7 @@ export const FilterSheet = forwardRef<BottomSheetModal, FilterSheetProps>(({ cur
   const [dateRegFrom, setDateRegFrom] = useState(current.dateRegisteredFrom ?? '');
   const [dateRegTo, setDateRegTo] = useState(current.dateRegisteredTo ?? '');
   const [pharmacistNames, setPharmacistNames] = useState<string[]>(current.pharmacistNames ?? []);
+  const [branchNames, setBranchNames] = useState<string[]>(current.branchNames ?? []);
 
   const [datePickerCtx, setDatePickerCtx] = useState<{ field: DateField; date: Date } | null>(null);
 
@@ -299,13 +337,20 @@ export const FilterSheet = forwardRef<BottomSheetModal, FilterSheetProps>(({ cur
     queryFn: listPharmacists
   });
 
+  const { data: user } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: getMe
+  });
+
   const allPharmacistNames = (pharmacists ?? []).map((p) => p.name);
+  const allBranchNames = user?.branches ?? [];
 
   function tabBadgeCount(tab: TabId): number {
     if (tab === 'age') return ageGroup ? 1 : 0;
     if (tab === 'lastAppt') return lastApptPreset || lastApptFrom || lastApptTo ? 1 : 0;
     if (tab === 'dateReg') return dateRegPreset || dateRegFrom || dateRegTo ? 1 : 0;
-    return pharmacistNames.length > 0 ? 1 : 0;
+    if (tab === 'pharmacist') return pharmacistNames.length > 0 ? 1 : 0;
+    return branchNames.length > 0 ? 1 : 0;
   }
   const totalActive = TABS.reduce((n, t) => n + tabBadgeCount(t.id), 0);
 
@@ -343,6 +388,7 @@ export const FilterSheet = forwardRef<BottomSheetModal, FilterSheetProps>(({ cur
     setDateRegFrom('');
     setDateRegTo('');
     setPharmacistNames([]);
+    setBranchNames([]);
   }
 
   function handleApply() {
@@ -354,13 +400,18 @@ export const FilterSheet = forwardRef<BottomSheetModal, FilterSheetProps>(({ cur
       dateRegisteredPreset: dateRegPreset,
       dateRegisteredFrom: dateRegFrom || undefined,
       dateRegisteredTo: dateRegTo || undefined,
-      pharmacistNames: pharmacistNames.length > 0 ? pharmacistNames : undefined
+      pharmacistNames: pharmacistNames.length > 0 ? pharmacistNames : undefined,
+      branchNames: branchNames.length > 0 ? branchNames : undefined
     });
     (ref as React.RefObject<BottomSheetModal>)?.current?.dismiss();
   }
 
   function togglePharmacist(name: string) {
     setPharmacistNames((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
+  }
+
+  function toggleBranch(name: string) {
+    setBranchNames((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
   }
 
   function openDatePicker(field: DateField) {
@@ -419,7 +470,7 @@ export const FilterSheet = forwardRef<BottomSheetModal, FilterSheetProps>(({ cur
 
           {/* Tab chip section — 2 fixed rows */}
           <View style={styles.tabSection}>
-            {[TABS.slice(0, 2), TABS.slice(2, 4)].map((row, rowIdx) => (
+            {[TABS.slice(0, 2), TABS.slice(2, 4), TABS.slice(4, 5)].map((row, rowIdx) => (
               <View key={rowIdx} style={styles.tabRow}>
                 {row.map((tab) => (
                   <TabChip key={tab.id} tab={tab} isActive={activeTab === tab.id} badge={tabBadgeCount(tab.id)} onPress={() => switchTab(tab.id)} />
@@ -476,6 +527,10 @@ export const FilterSheet = forwardRef<BottomSheetModal, FilterSheetProps>(({ cur
                 onToggle={togglePharmacist}
                 onClearAll={() => setPharmacistNames([])}
               />
+            ) : null}
+
+            {activeTab === 'branch' ? (
+              <BranchPane branchNames={branchNames} allNames={allBranchNames} onToggle={toggleBranch} onClearAll={() => setBranchNames([])} />
             ) : null}
           </Animated.View>
 

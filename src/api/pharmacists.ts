@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import * as pharmacistsLocalRepository from '../services/pharmacistsLocalRepository';
 import type { IPharmacist } from '../types';
 
 type RawPharmacist = Omit<IPharmacist, 'id'> & { _id: string };
@@ -8,8 +9,12 @@ function normalize(raw: RawPharmacist): IPharmacist {
 }
 
 export async function listPharmacists(): Promise<IPharmacist[]> {
-  const { data } = await apiClient.get<{ data: { pharmacists: RawPharmacist[]; total: number } }>('/api/pharmacists');
-  return data.data.pharmacists.map(normalize);
+  try {
+    const { data } = await apiClient.get<{ data: { pharmacists: RawPharmacist[]; total: number } }>('/api/pharmacists');
+    return data.data.pharmacists.map(normalize);
+  } catch {
+    return pharmacistsLocalRepository.list();
+  }
 }
 
 export async function createPharmacist(payload: { name: string; phoneNumber?: string; branch?: string }): Promise<IPharmacist> {
