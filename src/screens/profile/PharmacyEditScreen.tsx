@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
-import { Building2, ChevronLeft, Upload } from 'lucide-react-native';
+import { Building2, ChevronLeft, Trash2, TriangleAlert, Upload } from 'lucide-react-native';
 import { getMe, updateMe, uploadLogo } from '../../api/users';
 import { queryKeys } from '../../api/queryKeys';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { Button, Input } from '../../components/ui';
 import { ScreenWrapper } from '../../components/layout';
 import { colors } from '../../theme/colors';
@@ -30,14 +31,37 @@ function PharmacyForm({ user, navigation }: PharmacyFormProps) {
   const [companyName, setCompanyName] = useState(user.companyName ?? '');
   const [logoUri, setLogoUri] = useState<string | null>(user.companyLogo ?? null);
   const [isUploading, setIsUploading] = useState(false);
+  const [branches, setBranches] = useState<string[]>(user.branches ?? []);
+  const [newBranch, setNewBranch] = useState('');
+  const [blockedError, setBlockedError] = useState('');
 
   const { mutateAsync: saveCompanyName, isPending } = useMutation({
-    mutationFn: (payload: { companyName: string }) => updateMe(payload),
+    mutationFn: (payload: { companyName: string; branches: string[] }) => updateMe(payload),
     onSuccess: (updated) => {
       queryClient.setQueryData(queryKeys.me, updated);
       navigation.goBack();
+    },
+    onError: (err: unknown) => {
+      setBlockedError(getApiErrorMessage(err));
     }
   });
+
+  function addBranch() {
+    const trimmed = newBranch.trim();
+    if (!trimmed || branches.includes(trimmed)) return;
+    setBranches((prev) => [...prev, trimmed]);
+    setNewBranch('');
+  }
+
+  function removeBranch(branch: string) {
+    setBranches((prev) => prev.filter((b) => b !== branch));
+  }
+
+  function goToPharmacists() {
+    setBlockedError('');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (navigation.getParent() as any)?.navigate('Pharmacists');
+  }
 
   async function handleLogoUpload() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -61,7 +85,11 @@ function PharmacyForm({ user, navigation }: PharmacyFormProps) {
   }
 
   async function handleSave() {
-    await saveCompanyName({ companyName: companyName.trim() });
+    try {
+      await saveCompanyName({ companyName: companyName.trim(), branches });
+    } catch {
+      // surfaced via onError -> blockedError
+    }
   }
 
   return (
@@ -104,8 +132,63 @@ function PharmacyForm({ user, navigation }: PharmacyFormProps) {
         {/* Company name */}
         <Input label="Company Name" placeholder="e.g. MedPlus Pharmacy" value={companyName} onChangeText={setCompanyName} autoCapitalize="words" />
 
+        {/* Branches */}
+        <View style={styles.branchesSection}>
+          <Text style={styles.branchesLabel}>Branches</Text>
+          {branches.length > 0 ? (
+            <View style={styles.branchList}>
+              {branches.map((branch) => (
+                <View key={branch} style={styles.branchRow}>
+                  <Text style={styles.branchRowName}>{branch}</Text>
+                  <Pressable onPress={() => removeBranch(branch)} hitSlop={8}>
+                    <Trash2 size={16} color={colors.textLight} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <View style={styles.addBranchRow}>
+            <View style={styles.addBranchInput}>
+              <TextInput
+                style={styles.addBranchInputText}
+                value={newBranch}
+                onChangeText={setNewBranch}
+                placeholder="e.g. North Wing"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="words"
+                onSubmitEditing={addBranch}
+              />
+            </View>
+            <Pressable onPress={addBranch} style={styles.addBranchBtn}>
+              <Text style={styles.addBranchBtnText}>Add</Text>
+            </Pressable>
+          </View>
+        </View>
+
         <Button title="Save Changes" onPress={handleSave} loading={isPending} disabled={isPending || isUploading} />
       </KeyboardAwareScrollView>
+
+      <Modal transparent visible={!!blockedError} animationType="fade" onRequestClose={() => setBlockedError('')}>
+        <View style={styles.blockedOverlay}>
+          <View style={styles.blockedCard}>
+            <View style={styles.blockedIconWrap}>
+              <TriangleAlert size={22} color={colors.destructive} />
+            </View>
+            <View style={styles.blockedTextWrap}>
+              <Text style={styles.blockedTitle}>Can&apos;t Remove This Branch</Text>
+              <Text style={styles.blockedMessage}>{blockedError}</Text>
+            </View>
+            <View style={styles.blockedFooter}>
+              <Pressable onPress={goToPharmacists} style={styles.blockedReassignBtn}>
+                <Text style={styles.blockedReassignBtnText}>Reassign Pharmacists</Text>
+              </Pressable>
+              <Pressable onPress={() => setBlockedError('')} style={styles.blockedCancelBtn}>
+                <Text style={styles.blockedCancelBtnText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -175,5 +258,102 @@ const styles = StyleSheet.create({
     gap: spacing.xs
   },
   uploadText: { fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: colors.accent, fontWeight: '600' },
-  uploadHint: { fontFamily: fonts.body, fontSize: 12, lineHeight: 16, color: colors.textMuted }
+  uploadHint: { fontFamily: fonts.body, fontSize: 12, lineHeight: 16, color: colors.textMuted },
+  // Branches
+  branchesSection: { gap: spacing.sm },
+  branchesLabel: { fontFamily: fonts.bodySemiBold, fontSize: 12, color: colors.textMuted },
+  branchList: { gap: spacing.sm },
+  branchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: colors.inputFill,
+    borderWidth: 1,
+    borderColor: '#DDD6C7',
+    paddingHorizontal: 14
+  },
+  branchRowName: { fontFamily: fonts.bodySemiBold, fontSize: 14, color: colors.text },
+  addBranchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  addBranchInput: {
+    flex: 1,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: colors.inputFill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    paddingHorizontal: 14
+  },
+  addBranchInputText: { fontFamily: fonts.body, fontSize: 13, color: colors.text, padding: 0 },
+  addBranchBtn: {
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: colors.text,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18
+  },
+  addBranchBtnText: { fontFamily: fonts.bodySemiBold, fontSize: 14, color: colors.background },
+  // Blocked-removal modal
+  blockedOverlay: {
+    flex: 1,
+    backgroundColor: '#00000066',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg
+  },
+  blockedCard: {
+    width: 320,
+    backgroundColor: colors.card,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.base,
+    gap: 14,
+    alignItems: 'center'
+  },
+  blockedIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFF6F4',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  blockedTextWrap: { gap: 6, alignItems: 'center' },
+  blockedTitle: {
+    fontFamily: 'FunnelSans-Bold',
+    fontWeight: '700',
+    fontSize: 17,
+    color: colors.text,
+    textAlign: 'center'
+  },
+  blockedMessage: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#5F5A53',
+    textAlign: 'center'
+  },
+  blockedFooter: { width: '100%', gap: spacing.sm, paddingTop: 6 },
+  blockedReassignBtn: {
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: colors.text,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  blockedReassignBtnText: { fontFamily: fonts.bodySemiBold, fontSize: 14, color: colors.background },
+  blockedCancelBtn: {
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: '#F5F1E8',
+    borderWidth: 1,
+    borderColor: '#D8D1C1',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  blockedCancelBtnText: { fontFamily: fonts.bodySemiBold, fontSize: 14, color: colors.accent }
 });

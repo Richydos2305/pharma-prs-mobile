@@ -14,6 +14,7 @@ export interface IPharmacist {
   id: string;
   name: string;
   phoneNumber?: string;
+  branch?: string;
 }
 
 export interface IUser {
@@ -25,6 +26,7 @@ export interface IUser {
   companyName?: string;
   companyLogo?: string;
   primaryColor?: string;
+  branches: string[];
 }
 
 export interface PatientCustomFieldsSection {
